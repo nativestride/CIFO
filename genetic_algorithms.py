@@ -20,8 +20,31 @@ from ga_utilities import hc_wrapper_for_ga # If used as a local search default
 
 # Import List and Callable for type hinting
 from typing import List, Callable, Dict, Any 
+import numpy as np # Added for metrics calculation
 
 logger = logging.getLogger(__name__)
+
+# Helper function to calculate genotypic diversity
+def calculate_genotypic_diversity(population: List[LeagueSolution]) -> float:
+    """
+    Calculates genotypic diversity as the number of unique solution representations.
+    Returns 0.0 if the population is empty.
+    """
+    if not population:
+        return 0.0
+    # Assuming sol.repr gives a hashable representation of the genotype
+    # For complex objects, ensure sol.repr is a tuple or string.
+    # If sol.repr is a list of lists, it needs to be converted to a tuple of tuples.
+    # Example: unique_genotypes = set(tuple(map(tuple, sol.repr)) for sol in population)
+    # For now, assuming sol.repr is directly hashable or a simple list of hashable items.
+    try:
+        # If sol.repr is a list of simple hashable items (like player IDs in teams)
+        unique_genotypes = set(tuple(sorted(item)) if isinstance(item, list) else item for sol in population for item in sol.repr)
+    except TypeError: # Fallback if items in sol.repr are not sortable or complex
+        # This fallback might be less accurate if sol.repr structure is inconsistent
+        unique_genotypes = set(str(sol.repr) for sol in population)
+    return float(len(unique_genotypes))
+
 
 def _evolve_one_ga_generation(
     current_population: List[LeagueSolution], 
@@ -34,11 +57,23 @@ def _evolve_one_ga_generation(
     mutation_operator: Callable, 
     prob_apply_mutation: float, 
     logger_instance: logging.Logger
-) -> List[LeagueSolution]:
+) -> tuple[List[LeagueSolution], float, float, float]: # Modified return type
     """
     Evolves a population for a single GA generation.
     Handles elitism, selection, crossover, and mutation.
+    Returns the new population and diversity metrics.
     """
+    # Calculate metrics before modification by elitism or selection for the new generation
+    if current_population:
+        fitness_values = [sol.fitness() for sol in current_population]
+        avg_fitness = np.mean(fitness_values) if fitness_values else float('inf')
+        std_fitness = np.std(fitness_values) if fitness_values else 0.0
+        geno_diversity = calculate_genotypic_diversity(current_population)
+    else:
+        avg_fitness = float('inf')
+        std_fitness = 0.0
+        geno_diversity = 0.0
+
     current_population.sort(key=lambda x: x.fitness()) # Sort by fitness (lower is better)
 
     new_population: List[LeagueSolution] = []
@@ -84,7 +119,7 @@ def _evolve_one_ga_generation(
         else:
             logger_instance.debug("_evolve_one_ga_generation: Generated child was invalid or None. Not added.")
     
-    return new_population
+    return new_population, avg_fitness, std_fitness, geno_diversity
 
 
 def generate_population(
@@ -251,14 +286,33 @@ def genetic_algorithm(
         logger.error("GA Error: Initial population is empty after generation. Cannot determine initial best.")
         return None, float('inf'), [] # Return a failure tuple
 
-    history = [best_fitness_overall]
+    # Calculate initial population metrics
+    if population:
+        initial_fitness_values = [sol.fitness() for sol in population]
+        avg_pop_fitness = np.mean(initial_fitness_values) if initial_fitness_values else float('inf')
+        std_pop_fitness = np.std(initial_fitness_values) if initial_fitness_values else 0.0
+        geno_pop_diversity = calculate_genotypic_diversity(population)
+    else:
+        avg_pop_fitness = float('inf')
+        std_pop_fitness = 0.0
+        geno_pop_diversity = 0.0
+
+    history = [{
+        'best_fitness': best_fitness_overall,
+        'avg_fitness': avg_pop_fitness,
+        'std_fitness': std_pop_fitness,
+        'geno_diversity': geno_pop_diversity
+    }]
 
     if verbose:
-        logger.info(f"Initial best fitness: {best_fitness_overall:.4f}")
+        logger.info(
+            f"Initial best fitness: {best_fitness_overall:.4f}, Avg fitness: {avg_pop_fitness:.4f}, "
+            f"Std fitness: {std_pop_fitness:.4f}, Geno diversity: {geno_pop_diversity:.1f}"
+        )
 
     for generation in range(max_generations):
-        # Call the new helper function to evolve one generation
-        new_population = _evolve_one_ga_generation(
+        # _evolve_one_ga_generation now returns new_population, avg_fitness, std_fitness, geno_diversity
+        new_population, avg_fitness_from_evolve, std_fitness_from_evolve, geno_diversity_from_evolve = _evolve_one_ga_generation(
             current_population=population,
             population_size=population_size,
             elitism_size=elitism_size,
@@ -270,10 +324,18 @@ def genetic_algorithm(
             prob_apply_mutation=prob_apply_mutation,
             logger_instance=logger
         )
+        # avg_fitness_from_evolve, std_fitness_from_evolve, geno_diversity_from_evolve are from the population *before* this generation's evolution
 
-        if not new_population: 
+        if not new_population:
             logger.error(f"GA Gen {generation + 1}: _evolve_one_ga_generation returned an empty new_population. Stopping.")
-            break 
+            # Log current overall best fitness even if evolution fails for this gen
+            history.append({
+                'best_fitness': best_fitness_overall,
+                'avg_fitness': avg_fitness_from_evolve, # from previous state
+                'std_fitness': std_fitness_from_evolve, # from previous state
+                'geno_diversity': geno_diversity_from_evolve # from previous state
+            })
+            break
 
         population = new_population[:population_size] 
 
@@ -354,10 +416,24 @@ def genetic_algorithm(
             if verbose:
                 logger.info(f"GA Gen {generation + 1}: New best fitness: {best_fitness_overall:.4f}")
         elif verbose and (generation + 1) % 5 == 0: # Log progress periodically
-            logger.info(f"GA Gen {generation + 1}: Current gen best: {current_gen_best_fit:.4f} (Overall best: {best_fitness_overall:.4f})")
+            logger.info(
+                f"GA Gen {generation + 1}: Current gen best: {current_gen_best_fit:.4f} (Overall best: {best_fitness_overall:.4f}), "
+                f"Avg fitness (pre-select): {avg_fitness_from_evolve:.4f}, Std Dev (pre-select): {std_fitness_from_evolve:.4f}, "
+                f"Diversity (pre-select): {geno_diversity_from_evolve:.1f}"
+            )
 
-        history.append(best_fitness_overall)
+        history.append({
+            'best_fitness': best_fitness_overall, # This is overall best *after* current generation
+            'avg_fitness': avg_fitness_from_evolve,
+            'std_fitness': std_fitness_from_evolve,
+            'geno_diversity': geno_diversity_from_evolve
+        })
 
     if verbose:
-        logger.info(f"Genetic Algorithm finished. Final best fitness: {best_fitness_overall:.4f}")
+        logger.info(
+            f"Genetic Algorithm finished. Final best fitness: {best_fitness_overall:.4f}. "
+            f"Final avg fitness (of last pre-select pop): {history[-1]['avg_fitness']:.4f}, "
+            f"Final std_fitness (of last pre-select pop): {history[-1]['std_fitness']:.4f}, "
+            f"Final geno_diversity (of last pre-select pop): {history[-1]['geno_diversity']:.1f}"
+        )
     return best_solution_overall, best_fitness_overall, history
