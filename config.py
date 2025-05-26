@@ -238,7 +238,7 @@ all_configs: AllConfigs = {
         "ga_specific_params": { # This is for the island_model_ga_params argument
             "num_islands": 3,
             "island_population_size": 30,
-            "max_generations": 100, # Renamed from max_generations_total for consistency with GASpecificParams
+            "max_generations_total": 100, # Using max_generations_total as expected by the island model code
             "migration_frequency": 10,
             "num_migrants": 3,
             "migration_topology": "ring",
