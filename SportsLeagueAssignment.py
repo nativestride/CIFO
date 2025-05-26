@@ -84,6 +84,7 @@ from serialization_utils import (
 )
 
 # Custom module imports
+import statistical_utils as su # For statistical test selection report
 # Refactored operator and algorithm imports
 from mutation_operators import (
     mutate_swap,
@@ -251,28 +252,72 @@ from config import all_configs
 #    logger.info("Running all defined configurations.")
 
 
-# --- Your main experiment execution block would then use all_configs (or all_configs_to_run) ---
-# for config_name, algo_config in all_configs_to_run.items():
-#    # ...
+# Example of how you might select a subset to run for testing:
+# Make sure EXPERIMENT_CONFIG is defined if you use it this way.
+# EXPERIMENT_CONFIG = {'selected_configurations': ["HillClimbing_Std", "GA_Tournament_OnePoint", ...]}
+# if 'selected_configurations' in EXPERIMENT_CONFIG and EXPERIMENT_CONFIG['selected_configurations']:
+#    all_configs_to_run = {
+#        k: all_configs[k] for k in EXPERIMENT_CONFIG['selected_configurations'] if k in all_configs
+#    }
+#    logger.info(f"Running selected configurations: {list(all_configs_to_run.keys())}")
+# else:
+#    all_configs_to_run = all_configs
+#    logger.info("Running all defined configurations.")
 
-logger.info(f"TESTING MODE: Defined {len(all_configs)} algorithm configurations.")
+# --- FOR TEST RUN ---
+SELECTED_TEST_CONFIGS = ["GA_Tournament_OnePoint", "GA_Island_Model_Test", "HillClimbing_Std"]
+all_configs_to_run = {
+    k: all_configs[k] for k in SELECTED_TEST_CONFIGS if k in all_configs
+}
+if len(all_configs_to_run) != len(SELECTED_TEST_CONFIGS):
+    logger.warning(f"Not all selected test configurations were found in all_configs. Running with: {list(all_configs_to_run.keys())}")
+else:
+    logger.info(f"TEST RUN: Running with selected configurations: {list(all_configs_to_run.keys())}")
+# --- END TEST RUN CONFIG ---
+
+
+logger.info(f"Total defined configurations in config.py: {len(all_configs)}")
 
 
 # %% [markdown]
 # ### 2.2 General Experiment Configuration
 # %%
 EXPERIMENT_CONFIG = {
-    "parallel": False,  # Set to False for GA Hybrid testing initially
-    "num_runs": 1,  # Set to 1 for GA Hybrid testing
-    "num_processes": 1,  # When parallel is False, this is less critical
+    "parallel": False, 
+    "num_runs": 5,  # Small number of runs for testing
+    "num_processes": 1, 
     "save_results_csv": True,
-    "results_csv_file": "experiment_results_all_algos.csv",  # Specific output file
-    "global_runner_verbose": True,  # Verbosity for this script's runner functions
-    "save_best_solution_objects": True,  # Save if it works
+    "results_csv_file": "experiment_results_all_algos.csv",
+    "global_runner_verbose": True, 
+    "save_best_solution_objects": True, 
     "pickle_file_template": "best_solution_all_algos_{config_name_safe}.pkl",
+    "plotting_options": { # Ensure all plots are enabled for the test run
+        "generate_all_plots": True, 
+        "show_enhanced_box_plots": True, 
+        "show_aggregated_convergence_curves": True, 
+        "show_critical_difference_diagram": True, 
+        "show_final_fitness_distributions": True, 
+        "show_time_to_target_plot": True, 
+        "show_ga_diversity_metrics": True, 
+        "show_island_model_diagnostics": True, 
+        "generate_statistical_report": True 
+    }
 }
 logger.info(
-    f"Global Experiment Config (GA Hybrid Test Mode): Parallel={EXPERIMENT_CONFIG['parallel']}, NumRuns={EXPERIMENT_CONFIG['num_runs']}"
+    f"Global Experiment Config (TEST RUN): Parallel={EXPERIMENT_CONFIG['parallel']}, NumRuns={EXPERIMENT_CONFIG['num_runs']}"
+)
+# Ensure all plotting functions are imported from plotting_utils
+from plotting_utils import (
+    plot_summary_statistics_bars,
+    plot_metric_distributions_boxplots,
+    plot_convergence_curves,
+    rank_algorithms_custom,
+    display_single_best_solution_details,
+    plot_critical_difference_diagram, 
+    plot_final_fitness_distributions,
+    plot_time_to_target,
+    plot_ga_diversity_metrics,
+    plot_island_model_diagnostics
 )
 
 
@@ -665,7 +710,7 @@ if __name__ == "__main__":
 
     script_overall_start_time = time.time()
     # These global variables should have been defined in earlier cells/sections of your script:
-    # problem_definition_global, players_data, EXPERIMENT_CONFIG, all_configs, solution_module_ref
+    # problem_definition_global, players_data, EXPERIMENT_CONFIG, all_configs_to_run (modified for test), solution_module_ref
     logger.info(f"Global Problem Definition: {problem_definition_global}")
     logger.info(f"Player Data: {len(players_data)} players loaded.")
     logger.info(f"Experiment Execution Config: {EXPERIMENT_CONFIG}")
@@ -674,7 +719,7 @@ if __name__ == "__main__":
     # This function call will execute all defined algorithm configurations for the specified number of runs.
     final_results_df, final_history_map, final_best_solutions_data_map = (
         run_experimental_suite(
-            configurations_dict=all_configs,  # Defined in Section 2.1
+            configurations_dict=all_configs_to_run,  # Using the filtered set for testing
             master_players_list_all=players_data,  # Loaded in Section 1.2
             master_problem_definition=problem_definition_global,  # Defined in Section 1.1
             num_runs=EXPERIMENT_CONFIG["num_runs"],
@@ -765,26 +810,101 @@ if __name__ == "__main__":
         # And ensure solution_module_ref is defined: import solution as solution_module_ref
 
         # Call the plotting and analysis functions (now imported from experiment_utils.py)
+        # Core analysis plots - typically always run
         plot_summary_statistics_bars(final_results_df)
-        plot_metric_distributions_boxplots(final_results_df)
-        plot_convergence_curves(final_history_map)
+        
+        # Retrieve plotting options from EXPERIMENT_CONFIG
+        plotting_opts = EXPERIMENT_CONFIG.get("plotting_options", {})
+        master_plot_switch = plotting_opts.get("generate_all_plots", True) # Default to True if not specified
 
-        # Filter data for ranking (excluding error rows and non-finite fitness)
+        # Filter data for ranking and some plots (excluding error rows and non-finite fitness)
+        # This is used by multiple plots and ranking.
         valid_results_for_ranking = final_results_df[
-            final_results_df["BestFitness"].notna()
-            & np.isfinite(final_results_df["BestFitness"])
-            & (
-                ~final_results_df["AlgorithmName"].str.contains(
-                    "ERROR", case=False, na=False
-                )
-            )  # Exclude error rows
+            final_results_df["BestFitness"].notna() & 
+            np.isfinite(final_results_df["BestFitness"]) &
+            (~final_results_df["AlgorithmName"].str.contains("ERROR", case=False, na=False))
         ]
+
+        if plotting_opts.get("show_enhanced_box_plots", master_plot_switch):
+            # The enhanced box plot function itself handles metrics like BestFitness, RuntimeSeconds, etc.
+            plot_metric_distributions_boxplots(
+                final_results_df, # Pass the full df, internal filtering is done
+                plot_type='box', 
+                show_points=True, 
+                show_significance=True, # This will trigger stat tests within the function
+                alpha_level=su.ALPHA_LEVEL # Use alpha from statistical_utils
+            )
+
+        if plotting_opts.get("show_aggregated_convergence_curves", master_plot_switch):
+            plot_convergence_curves(final_history_map)
+
         if not valid_results_for_ranking.empty:
-            # The rank_algorithms_custom function (from experiment_utils.py)
-            # handles its own printing/displaying of the rank table and plot.
+            if plotting_opts.get("generate_statistical_report", master_plot_switch):
+                logger.info("\n--- Generating Statistical Test Selection Report for BestFitness ---")
+                # Prepare data for the report (using valid results)
+                groups_data_for_report = valid_results_for_ranking.groupby('Configuration')['BestFitness'].apply(list).to_dict()
+                
+                # Filter for groups with min data points, consistent with generate_statistical_test_selection_report's internal logic
+                min_data_points_for_report = 3 
+                cleaned_groups_data_for_report = {
+                    name: data for name, data in groups_data_for_report.items() 
+                    if len([d for d in data if pd.notna(d)]) >= min_data_points_for_report
+                }
+                if len(cleaned_groups_data_for_report) >=2:
+                    stat_report_str = su.generate_statistical_test_selection_report(
+                        cleaned_groups_data_for_report, 
+                        metric_name='BestFitness',
+                        alpha_level=su.ALPHA_LEVEL
+                    )
+                    logger.info("\n" + stat_report_str)
+                else:
+                    logger.info("Skipping statistical test selection report: Less than 2 groups with sufficient data for BestFitness.")
+
+
+            if plotting_opts.get("show_critical_difference_diagram", master_plot_switch):
+                logger.info("\n--- Generating Critical Difference Analysis Plots (if applicable) ---")
+                plot_critical_difference_diagram(
+                    valid_results_for_ranking, 
+                    metric_col='BestFitness',
+                    config_col='Configuration',
+                    run_col='Run',
+                    alpha_level=su.ALPHA_LEVEL
+                )
+            
+            if plotting_opts.get("show_final_fitness_distributions", master_plot_switch):
+                logger.info("\n--- Generating Final Fitness Distribution Plots ---")
+                plot_final_fitness_distributions(final_results_df, metric_col='BestFitness') # Uses full df, filters internally
+
+            # Algorithm Ranking - typically always run if valid data exists
             algorithm_ranking_df = rank_algorithms_custom(valid_results_for_ranking)
-        else:
-            logger.info("No valid results to perform algorithm ranking.")
+
+            # Conditional plots based on history map
+            if final_history_map:
+                if plotting_opts.get("show_time_to_target_plot", master_plot_switch):
+                    logger.info("\n--- Generating Time-to-Target (Attainment) Plots ---")
+                    example_target_fitness_levels = sorted([
+                        problem_definition_global.get("max_budget", 750) * 0.5,
+                        problem_definition_global.get("max_budget", 750) * 0.4,
+                        problem_definition_global.get("max_budget", 750) * 0.3
+                    ], reverse=False)
+                    plot_time_to_target(
+                        final_history_map, 
+                        target_fitness_values=example_target_fitness_levels,
+                        max_evaluations=None 
+                    )
+                
+                if plotting_opts.get("show_ga_diversity_metrics", master_plot_switch):
+                    logger.info("\n--- Generating GA Diversity Metrics Plots (if applicable) ---")
+                    plot_ga_diversity_metrics(final_history_map)
+
+                if plotting_opts.get("show_island_model_diagnostics", master_plot_switch):
+                    logger.info("\n--- Generating Island Model Diagnostic Plots (if applicable) ---")
+                    plot_island_model_diagnostics(final_history_map)
+            else: # final_history_map is empty
+                logger.info("Skipping plots requiring history data (Time-to-Target, GA Diversity, Island Model Diagnostics) as final_history_map is empty.")
+        
+        else: # valid_results_for_ranking is empty
+            logger.info("No valid results (after filtering for errors/NaNs) for detailed plotting, statistical reporting, or ranking.")
 
         # --- Detailed Analysis of the Single Best Solution Found ---
         logger.info("\n--- Detailed Analysis of Overall Best Solution ---")
@@ -823,6 +943,19 @@ if __name__ == "__main__":
             logger.info(
                 "No single overall best solution found or recorded for detailed analysis."
             )
+        
+        # --- Display Table of Best Solution per Configuration ---
+        if final_best_solutions_data_map:
+            plotting_utils.display_best_solution_per_configuration_table(
+                final_best_solutions_data_map,
+                players_data,
+                problem_definition_global,
+                solution_module_ref, # Pass the imported solution module
+                top_n=None # Display all configurations, or set a number e.g. 10
+            )
+        else:
+            logger.info("No best solution data recorded for any configuration; skipping table of best solutions per config.")
+
 
     else:  # This else corresponds to: if not final_results_df.empty:
         logger.warning(
