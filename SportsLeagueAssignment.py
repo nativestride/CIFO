@@ -77,6 +77,7 @@ from plotting_utils import (
     plot_metric_distributions_boxplots,
     plot_summary_statistics_bars,
     rank_algorithms_custom,
+    display_plot_info, # Added import
 )
 from serialization_utils import (
     extract_solution_data_for_storage,
@@ -303,9 +304,15 @@ EXPERIMENT_CONFIG = {
         "generate_statistical_report": True 
     }
 }
+
+ANALYSIS_CONFIG = {
+    'verbose_plotting': True  # Set to False to reduce plot-related console output
+}
+
 logger.info(
     f"Global Experiment Config (TEST RUN): Parallel={EXPERIMENT_CONFIG['parallel']}, NumRuns={EXPERIMENT_CONFIG['num_runs']}"
 )
+logger.info(f"Analysis verbose plotting enabled: {ANALYSIS_CONFIG['verbose_plotting']}")
 # Ensure all plotting functions are imported from plotting_utils
 from plotting_utils import (
     plot_summary_statistics_bars,
@@ -317,8 +324,14 @@ from plotting_utils import (
     plot_final_fitness_distributions,
     plot_time_to_target,
     plot_ga_diversity_metrics,
-    plot_island_model_diagnostics
+    plot_island_model_diagnostics,
+    plot_overall_best_fitness_convergence,
+    display_summary_statistics_table,
+    plot_parallel_coordinates,
+    plot_scatter_plot_matrix, # Added import
+    # display_plot_info was added above, ensure no duplicates if other files also import it.
 )
+import plotting_utils # For display_best_solution_per_configuration_table if not individually imported
 
 
 # %% [markdown]
@@ -811,8 +824,29 @@ if __name__ == "__main__":
 
         # Call the plotting and analysis functions (now imported from experiment_utils.py)
         # Core analysis plots - typically always run
-        plot_summary_statistics_bars(final_results_df)
+        display_plot_info(
+            title="Summary Statistics Bar Charts",
+            what_it_shows="Bar charts for key performance metrics (BestFitness, Iterations, FunctionEvaluations, RuntimeSeconds), showing the mean value for each algorithm configuration. Error bars represent +/- 1 standard deviation.",
+            how_to_interpret="Compare the average performance of algorithms. For 'BestFitness' and 'RuntimeSeconds', lower bars are generally better. For 'Iterations' and 'FunctionEvaluations', context matters (e.g., higher might mean more exploration but also more cost). Overlapping error bars might indicate no significant difference in means.",
+            purpose="To get a quick overview of the average performance and variability of each algorithm across different metrics.",
+            verbose=ANALYSIS_CONFIG['verbose_plotting']
+        )
+        plot_summary_statistics_bars(final_results_df, verbose=ANALYSIS_CONFIG['verbose_plotting'])
         
+        # Display the new summary statistics table
+        display_plot_info(
+            title="Interactive Summary Statistics Table",
+            what_it_shows="A table providing detailed summary statistics for key performance metrics (e.g., BestFitness, RuntimeSeconds, FunctionEvaluations). Statistics include Count, Mean, Median, Standard Deviation, Min, Max, and Confidence Intervals for the Mean.",
+            how_to_interpret="Review standard descriptive statistics. Mean/Median give central tendency. StdDev shows variability. Min/Max show range. Confidence Intervals provide a range for the true mean. In notebooks, relevant columns (like Mean BestFitness) may be highlighted (e.g., green for best).",
+            purpose="To offer a detailed, stylable, and potentially interactive (in future enhancements) tabular view of summary performance statistics, complementing graphical representations.",
+            verbose=ANALYSIS_CONFIG['verbose_plotting']
+        )
+        display_summary_statistics_table(
+            final_results_df, 
+            metrics_to_display=None, # Uses default metrics
+            verbose=ANALYSIS_CONFIG['verbose_plotting']
+        )
+
         # Retrieve plotting options from EXPERIMENT_CONFIG
         plotting_opts = EXPERIMENT_CONFIG.get("plotting_options", {})
         master_plot_switch = plotting_opts.get("generate_all_plots", True) # Default to True if not specified
@@ -826,17 +860,46 @@ if __name__ == "__main__":
         ]
 
         if plotting_opts.get("show_enhanced_box_plots", master_plot_switch):
+            display_plot_info(
+                title="Metric Distributions (Box Plots)",
+                what_it_shows="Box plots (or violin plots) displaying the distribution of key performance metrics (BestFitness, RuntimeSeconds, FunctionEvaluations) for each algorithm configuration across multiple runs. Shows median, quartiles, and potential outliers. Significance annotations (p-values or symbols) indicate statistical differences between groups.",
+                how_to_interpret="Assess the consistency and spread of results for each algorithm. Shorter boxes indicate more consistent performance. Lower medians are typically better for 'BestFitness'. Look for significance markers to identify statistically different performances. Outliers indicate runs with unusually high/low values.",
+                purpose="To compare the distribution and statistical significance of algorithm performance for key metrics, providing a more detailed view than just averages.",
+                verbose=ANALYSIS_CONFIG['verbose_plotting']
+            )
             # The enhanced box plot function itself handles metrics like BestFitness, RuntimeSeconds, etc.
             plot_metric_distributions_boxplots(
                 final_results_df, # Pass the full df, internal filtering is done
                 plot_type='box', 
                 show_points=True, 
                 show_significance=True, # This will trigger stat tests within the function
-                alpha_level=su.ALPHA_LEVEL # Use alpha from statistical_utils
+                alpha_level=su.ALPHA_LEVEL, # Use alpha from statistical_utils
+                verbose=ANALYSIS_CONFIG['verbose_plotting']
             )
 
         if plotting_opts.get("show_aggregated_convergence_curves", master_plot_switch):
-            plot_convergence_curves(final_history_map)
+            display_plot_info(
+                title="Aggregated Convergence Curves (Mean +/- 1 Std Dev)",
+                what_it_shows="The average best fitness found by each algorithm configuration over generations or iterations, aggregated across all runs. The shaded area represents +/- 1 standard deviation from the mean.",
+                how_to_interpret="Observe the speed and trajectory of convergence. Steeper downward slopes indicate faster improvement. A lower final mean fitness is generally better. A narrower shaded band indicates more consistent convergence behavior across runs.",
+                purpose="To understand the typical convergence behavior and consistency of each algorithm over its execution.",
+                verbose=ANALYSIS_CONFIG['verbose_plotting']
+            )
+            plot_convergence_curves(final_history_map, verbose=ANALYSIS_CONFIG['verbose_plotting'])
+            
+            # Call the new overall best fitness convergence plot
+            display_plot_info(
+                title="Overall Best Fitness Convergence",
+                what_it_shows="A single plot showing the 'best-so-far' fitness found by each algorithm configuration, aggregated across all its runs, plotted against evaluations or time. Each line represents an algorithm and shows the minimum fitness it had achieved up to that point in its search process (using 'steps-post' style).",
+                how_to_interpret="Lines that descend faster and reach lower final fitness values indicate better 'anytime' performance. This plot highlights which algorithm tends to find the best solutions earliest when considering all its attempts. Compare this to individual run convergence to see if an algorithm is consistently good or just had one lucky early run.",
+                purpose="To compare the best possible convergence trajectory an algorithm can achieve, by aggregating the best performance seen at each step across all independent runs. This complements `plot_aggregated_convergence_curves` by focusing on the 'frontier' of best solutions found.",
+                verbose=ANALYSIS_CONFIG['verbose_plotting']
+            )
+            plot_overall_best_fitness_convergence(
+                final_history_map, 
+                metric_to_plot_vs='Evaluations', 
+                verbose=ANALYSIS_CONFIG['verbose_plotting']
+            )
 
         if not valid_results_for_ranking.empty:
             if plotting_opts.get("generate_statistical_report", master_plot_switch):
@@ -862,26 +925,93 @@ if __name__ == "__main__":
 
 
             if plotting_opts.get("show_critical_difference_diagram", master_plot_switch):
-                logger.info("\n--- Generating Critical Difference Analysis Plots (if applicable) ---")
+                logger.info("\n--- Generating Critical Difference Analysis Plots (if applicable) ---") # Section header, not controlled by verbose_plotting
+                display_plot_info(
+                    title="Critical Difference / Pairwise Significance Plot (Nemenyi)",
+                    what_it_shows="If an overall statistical difference is found (via Friedman test), this plot visualizes pairwise comparisons between algorithm configurations using Nemenyi post-hoc test p-values. The `sign_plot` variant shows a matrix of p-values, where colors indicate significance levels. Average ranks are also provided.",
+                    how_to_interpret="Lower average ranks are better. In `sign_plot`, cells with low p-values (often highlighted or with stars) indicate a statistically significant difference between the corresponding pair of algorithms for the 'BestFitness' metric. A traditional CD diagram (if implemented) would show groups of algorithms that are not significantly different from each other via connecting bars.",
+                    purpose="To determine which algorithm configurations perform significantly differently from others based on their ranks of 'BestFitness' across multiple runs, providing a statistical basis for comparison.",
+                    verbose=ANALYSIS_CONFIG['verbose_plotting']
+                )
                 plot_critical_difference_diagram(
                     valid_results_for_ranking, 
                     metric_col='BestFitness',
                     config_col='Configuration',
                     run_col='Run',
-                    alpha_level=su.ALPHA_LEVEL
+                        alpha_level=su.ALPHA_LEVEL,
+                        verbose=ANALYSIS_CONFIG['verbose_plotting']
+                )
+
+            if plotting_opts.get("show_parallel_coordinates_plot", master_plot_switch) and len(valid_results_for_ranking['Configuration'].unique()) >=2 :
+                display_plot_info(
+                    title="Parallel Coordinates Plot for Normalized Performance",
+                    what_it_shows="Compares algorithm configurations across multiple performance metrics simultaneously. Each line is an algorithm configuration. Each vertical axis represents a performance metric. Metrics are normalized (0=worst, 1=best for that metric across configs). For 'lower-is-better' metrics (like BestFitness, RuntimeSeconds), the scale is inverted after normalization so higher lines are always better.",
+                    how_to_interpret="Look for lines that are consistently high across all (or most) axes – these are strong all-around performers. Lines that cross indicate trade-offs (e.g., good on one metric, worse on another). This helps identify configurations that are Pareto-optimal-like (no other config is better on all selected metrics).",
+                    purpose="To visualize multi-objective performance profiles and identify trade-offs between different algorithm configurations.",
+                    verbose=ANALYSIS_CONFIG['verbose_plotting']
+                )
+                plot_parallel_coordinates(
+                    final_results_df, # The function will use valid_data internally after filtering
+                    verbose=ANALYSIS_CONFIG['verbose_plotting']
+                )
+            elif plotting_opts.get("show_parallel_coordinates_plot", master_plot_switch):
+                 if verbose_plotting_flag: logger.info("Skipping Parallel Coordinates plot: Less than 2 configurations with valid data.")
+
+            if plotting_opts.get("show_scatter_plot_matrix", master_plot_switch):
+                display_plot_info(
+                    title="Scatter Plot Matrix (SPLOM) / Pair Plots",
+                    what_it_shows="A matrix of scatter plots. Each off-diagonal plot shows the relationship between a pair of performance metrics (e.g., BestFitness vs. RuntimeSeconds). Points are colored by algorithm configuration. Diagonal plots show the distribution (histogram or KDE) of each individual metric.",
+                    how_to_interpret="Off-diagonal plots: Look for correlations or patterns. For example, does lower BestFitness tend to correlate with higher Runtime? Are there distinct clusters for different algorithms? Diagonal plots: Show the univariate distribution of each metric for each algorithm.",
+                    purpose="To visualize pairwise relationships and distributions of performance metrics, helping to identify correlations, trade-offs, and how different algorithms populate the metric space.",
+                    verbose=ANALYSIS_CONFIG['verbose_plotting']
+                )
+                plot_scatter_plot_matrix(
+                    final_results_df, # The function will use valid_data internally after filtering
+                    verbose=ANALYSIS_CONFIG['verbose_plotting']
                 )
             
             if plotting_opts.get("show_final_fitness_distributions", master_plot_switch):
-                logger.info("\n--- Generating Final Fitness Distribution Plots ---")
-                plot_final_fitness_distributions(final_results_df, metric_col='BestFitness') # Uses full df, filters internally
+                logger.info("\n--- Generating Final Fitness Distribution Plots ---") # Section header
+                display_plot_info(
+                    title="Final Fitness Distributions (Histograms/KDE)",
+                    what_it_shows="Histograms or Kernel Density Estimate (KDE) plots showing the distribution of the final 'BestFitness' values achieved by each algorithm configuration across all runs.",
+                    how_to_interpret="Examine the shape of the distribution for each algorithm. A distribution skewed towards lower fitness values is desirable. Multi-modal distributions might indicate inconsistent final performance.",
+                    purpose="To visualize the spread and shape of final best fitness values for each algorithm, highlighting consistency and the likelihood of achieving good solutions.",
+                    verbose=ANALYSIS_CONFIG['verbose_plotting']
+                )
+                plot_final_fitness_distributions(final_results_df, metric_col='BestFitness', verbose=ANALYSIS_CONFIG['verbose_plotting']) # Uses full df, filters internally
 
             # Algorithm Ranking - typically always run if valid data exists
-            algorithm_ranking_df = rank_algorithms_custom(valid_results_for_ranking)
+            # Ensure verbose_plotting_flag is defined before this block if it's used
+            verbose_plotting_flag = ANALYSIS_CONFIG.get('verbose_plotting', True) # Default to True if not set
+
+            display_plot_info(
+                title="Algorithm Performance Ranking Table",
+                what_it_shows="A table summarizing mean performance metrics (BestFitness, Runtime, Evals), consistency, their respective ranks, and an overall rank for each algorithm configuration.",
+                how_to_interpret="Compare algorithms based on individual metric ranks and the 'OverallRank'. Lower ranks are generally better. 'ConsistencyScore' reflects the inverse of standard deviation in 'BestFitness' (higher is more consistent).",
+                purpose="To provide a detailed tabular summary of algorithm performance rankings across multiple criteria.",
+                verbose=ANALYSIS_CONFIG['verbose_plotting']
+            )
+            display_plot_info(
+                title="Overall Algorithm Ranking Bar Chart",
+                what_it_shows="A bar chart displaying the 'OverallRank' for each algorithm configuration, derived from summing ranks across multiple metrics (Fitness, Runtime, Evals, Consistency).",
+                how_to_interpret="Lower bars indicate better overall rank. This provides a composite view of performance based on the defined ranking scheme.",
+                purpose="To visually compare the final aggregated ranks of all algorithm configurations based on a multi-criteria assessment.",
+                verbose=ANALYSIS_CONFIG['verbose_plotting']
+            )
+            algorithm_ranking_df = rank_algorithms_custom(valid_results_for_ranking, verbose=ANALYSIS_CONFIG['verbose_plotting'])
 
             # Conditional plots based on history map
             if final_history_map:
                 if plotting_opts.get("show_time_to_target_plot", master_plot_switch):
-                    logger.info("\n--- Generating Time-to-Target (Attainment) Plots ---")
+                    logger.info("\n--- Generating Time-to-Target (Attainment) Plots ---") # Section header
+                    display_plot_info(
+                        title="Time-to-Target (Attainment) Plots",
+                        what_it_shows="The proportion of runs for each algorithm configuration that reached specific predefined target fitness values, plotted against the number of evaluations or generations.",
+                        how_to_interpret="Lines that rise faster and reach higher proportions indicate algorithms that are more effective and efficient at finding solutions of a certain quality. Compare how quickly different algorithms achieve various quality thresholds.",
+                        purpose="To assess the probability and speed with which algorithms can find solutions of a specified quality level (target fitness).",
+                        verbose=ANALYSIS_CONFIG['verbose_plotting']
+                    )
                     example_target_fitness_levels = sorted([
                         problem_definition_global.get("max_budget", 750) * 0.5,
                         problem_definition_global.get("max_budget", 750) * 0.4,
@@ -890,18 +1020,33 @@ if __name__ == "__main__":
                     plot_time_to_target(
                         final_history_map, 
                         target_fitness_values=example_target_fitness_levels,
-                        max_evaluations=None 
+                        max_evaluations=None,
+                        verbose=ANALYSIS_CONFIG['verbose_plotting']
                     )
                 
                 if plotting_opts.get("show_ga_diversity_metrics", master_plot_switch):
-                    logger.info("\n--- Generating GA Diversity Metrics Plots (if applicable) ---")
-                    plot_ga_diversity_metrics(final_history_map)
+                    logger.info("\n--- Generating GA Diversity Metrics Plots (if applicable) ---") # Section header
+                    display_plot_info(
+                        title="GA Population Diversity Metrics",
+                        what_it_shows="For Genetic Algorithm configurations, this plot shows the average population diversity (phenotypic, e.g., standard deviation of fitness; and genotypic, e.g., number of unique solutions) over generations, aggregated across runs. Separate subplots for each GA configuration.",
+                        how_to_interpret="Track how diversity changes during the GA run. High diversity can indicate good exploration, while low diversity might mean premature convergence. Phenotypic diversity relates to fitness variance, genotypic to solution structure variance. Ideal patterns depend on the problem and GA setup.",
+                        purpose="To diagnose the exploratory behavior of Genetic Algorithms by visualizing how population diversity evolves over generations.",
+                        verbose=ANALYSIS_CONFIG['verbose_plotting']
+                    )
+                    plot_ga_diversity_metrics(final_history_map, verbose=ANALYSIS_CONFIG['verbose_plotting'])
 
                 if plotting_opts.get("show_island_model_diagnostics", master_plot_switch):
-                    logger.info("\n--- Generating Island Model Diagnostic Plots (if applicable) ---")
-                    plot_island_model_diagnostics(final_history_map)
+                    logger.info("\n--- Generating Island Model Diagnostic Plots (if applicable) ---") # Section header
+                    display_plot_info(
+                        title="Island Model GA Diagnostics",
+                        what_it_shows="For Island Model GA configurations: 1) Per-island and global best fitness convergence. 2) Per-island diversity metrics (phenotypic and genotypic) over generations. Averaged over runs.",
+                        how_to_interpret="Convergence plot: Compare how individual islands progress relative to the global best. Diversity plots: Analyze diversity within each island; migration events might cause diversity spikes or drops. Helps tune migration parameters and understand inter-island dynamics.",
+                        purpose="To provide insights into the behavior of Island Model GAs, including island-specific performance, global convergence, and diversity dynamics across islands.",
+                        verbose=ANALYSIS_CONFIG['verbose_plotting']
+                    )
+                    plot_island_model_diagnostics(final_history_map, verbose=ANALYSIS_CONFIG['verbose_plotting'])
             else: # final_history_map is empty
-                logger.info("Skipping plots requiring history data (Time-to-Target, GA Diversity, Island Model Diagnostics) as final_history_map is empty.")
+                logger.info("Skipping plots requiring history data (Time-to-Target, GA Diversity, Island Model Diagnostics) as final_history_map is empty.") # This is a status message, fine as is.
         
         else: # valid_results_for_ranking is empty
             logger.info("No valid results (after filtering for errors/NaNs) for detailed plotting, statistical reporting, or ranking.")
@@ -914,6 +1059,13 @@ if __name__ == "__main__":
         overall_best_solution_storage_data = None
 
         if final_best_solutions_data_map:  # Check if the map has any entries
+            display_plot_info(
+                title="Detailed Analysis of Overall Best Solution",
+                what_it_shows="A detailed breakdown of the single best solution found across all configurations and runs. This includes team compositions, average skill, total salary, position fulfillment per team, and visualizations of team balance (skill vs. salary) and player position distributions (if generated by the called function).",
+                how_to_interpret="Examine the characteristics of the top-performing solution. Check if teams are balanced, meet budget and position constraints, and have high skill. Visualizations help identify specific strengths or weaknesses in the best solution's structure.",
+                purpose="To perform a deep dive into the structure and quality of the best individual solution identified by the experiments, offering insights into what an optimal or near-optimal solution looks like.",
+                verbose=ANALYSIS_CONFIG['verbose_plotting']
+            )
             for (
                 config_name_iter,
                 best_data_item,
@@ -938,23 +1090,32 @@ if __name__ == "__main__":
                 players_list=players_data,  # Corrected
                 problem_def=problem_definition_global,  # Corrected
                 sol_module=solution_module_ref,  # Corrected
+                verbose=ANALYSIS_CONFIG['verbose_plotting']
             )
         else:
-            logger.info(
+            logger.info( # Status message
                 "No single overall best solution found or recorded for detailed analysis."
             )
         
         # --- Display Table of Best Solution per Configuration ---
         if final_best_solutions_data_map:
+            display_plot_info(
+                title="Best Solution Per Configuration Table",
+                what_it_shows="A table listing the best fitness achieved by each algorithm configuration, the run number in which it was found, and a preview of the solution representation (e.g., a snippet of player assignments).",
+                how_to_interpret="Quickly identify the top solution and its fitness for each algorithm. The preview gives a glimpse into the solution structure.",
+                purpose="To summarize the single best outcome for each tested algorithm configuration and provide access to a representation of that solution.",
+                verbose=ANALYSIS_CONFIG['verbose_plotting']
+            )
             plotting_utils.display_best_solution_per_configuration_table(
                 final_best_solutions_data_map,
                 players_data,
                 problem_definition_global,
                 solution_module_ref, # Pass the imported solution module
-                top_n=None # Display all configurations, or set a number e.g. 10
+                top_n=None, # Display all configurations, or set a number e.g. 10
+                verbose=ANALYSIS_CONFIG['verbose_plotting']
             )
         else:
-            logger.info("No best solution data recorded for any configuration; skipping table of best solutions per config.")
+            logger.info("No best solution data recorded for any configuration; skipping table of best solutions per config.") # Status message
 
 
     else:  # This else corresponds to: if not final_results_df.empty:

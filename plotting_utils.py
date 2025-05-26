@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from typing import List, Dict, Any, Optional # Added for type hinting
+from typing import List, Dict, Any, Optional, Tuple # Added Tuple
 
 # Import LeagueSolution for type hinting if used explicitly, or rely on duck typing.
 # from solution import LeagueSolution
@@ -13,14 +13,60 @@ import statistical_utils as su # For statistical tests
 import scikit_posthocs as sp # For plotting CD diagram or sign_plot
 import matplotlib.pyplot as plt # Already imported but ensure for clarity
 
+# For notebook detection and rich display
+from experiment_utils import is_notebook
+try:
+    from IPython.display import display, Markdown, HTML # Added HTML
+    ipython_available = True
+except ImportError:
+    ipython_available = False
+
+from scipy import stats as scipy_stats # For confidence intervals
+from sklearn.preprocessing import MinMaxScaler
+from pandas.plotting import parallel_coordinates
+
 logger = logging.getLogger(__name__)
 
-def plot_summary_statistics_bars(final_results_df: pd.DataFrame):
-    if final_results_df.empty:
-        logger.info("No results for summary statistics bars.")
+def display_plot_info(title: str, what_it_shows: str, how_to_interpret: str, purpose: str, verbose: bool = True):
+    """
+    Displays information about a plot, adapting output for notebooks or standard consoles.
+    Controlled by a verbose flag.
+    """
+    if not verbose:
         return
 
-    logger.info("\n--- Summary Statistics & Bar Charts ---")
+    if is_notebook() and ipython_available:
+        md_string = f"""### Plot: {title}
+**What it shows:**
+{what_it_shows}
+
+**How to interpret it:**
+{how_to_interpret}
+
+**Purpose:**
+{purpose}
+---"""
+        display(Markdown(md_string))
+    else:
+        print("\n==================================================")
+        print(f"PLOT INFO: {title}")
+        print("==================================================")
+        print("WHAT IT SHOWS:")
+        print(what_it_shows)
+        print("\nHOW TO INTERPRET IT:")
+        print(how_to_interpret)
+        print("\nPURPOSE:")
+        print(purpose)
+        print("--------------------------------------------------\n")
+
+def plot_summary_statistics_bars(final_results_df: pd.DataFrame, verbose: bool = True):
+    if final_results_df.empty:
+        if verbose:
+            logger.info("No results for summary statistics bars.")
+        return
+
+    if verbose:
+        logger.info("\n--- Summary Statistics & Bar Charts ---")
     metrics = ["BestFitness", "Iterations", "FunctionEvaluations", "RuntimeSeconds"]
 
     for metric_col in metrics:
@@ -34,13 +80,15 @@ def plot_summary_statistics_bars(final_results_df: pd.DataFrame):
             & (~final_results_df["AlgorithmName"].str.contains("ERROR", na=False))
         ]
         if valid_data.empty:
-            logger.info(f"No valid data for metric '{metric_col}'. Skipping.")
+            if verbose:
+                logger.info(f"No valid data for metric '{metric_col}'. Skipping.")
             continue
 
         summary_stats = valid_data.groupby("Configuration")[metric_col].agg(
             ["mean", "std", "min", "max"]
         )
-        logger.info(f"\n📊 Statistics for: {metric_col}")
+        if verbose:
+            logger.info(f"\n📊 Statistics for: {metric_col}")
 
         fmt = "{:.4f}" if metric_col in ["BestFitness", "RuntimeSeconds"] else "{:.1f}"
         formatters = {
@@ -48,12 +96,13 @@ def plot_summary_statistics_bars(final_results_df: pd.DataFrame):
         }
         try:
             from IPython.display import display # type: ignore
-
-            display(summary_stats.style.format(formatters))
+            if verbose: # Assuming display is for verbose output
+                display(summary_stats.style.format(formatters))
         except ImportError:
-            print(summary_stats.to_string(formatters=formatters))
+            if verbose:
+                print(summary_stats.to_string(formatters=formatters))
 
-        plt.figure()
+        plt.figure(figsize=(10, 6)) # Set default figure size
         ax = summary_stats["mean"].plot(
             kind="bar",
             yerr=summary_stats["std"],
@@ -87,6 +136,127 @@ def plot_summary_statistics_bars(final_results_df: pd.DataFrame):
         plt.tight_layout()
         plt.show()
 
+def display_summary_statistics_table(
+    final_results_df: pd.DataFrame, 
+    metrics_to_display: Optional[List[str]] = None, 
+    alpha_level: float = 0.05, # For 1-alpha confidence level
+    verbose: bool = True
+):
+    """
+    Displays a detailed summary statistics table for specified metrics,
+    adapting output for notebooks (HTML/styled) or standard consoles.
+    Includes count, mean, median, std dev, min, max, and confidence intervals.
+    """
+    if not verbose:
+        return
+
+    if metrics_to_display is None:
+        metrics_to_display = ["BestFitness", "RuntimeSeconds", "FunctionEvaluations"]
+    
+    if not metrics_to_display:
+        logger.info("No metrics specified for summary statistics table.")
+        return
+
+    if verbose:
+        logger.info("\n--- Detailed Summary Statistics Tables ---")
+    
+    processed_any_metric = False
+    for metric_col in metrics_to_display:
+        if verbose:
+            logger.info(f"Processing summary statistics for metric: {metric_col}")
+
+        if metric_col not in final_results_df.columns:
+            logger.warning(f"Metric '{metric_col}' not found in results DataFrame. Skipping.")
+            continue
+
+        valid_data_metric = final_results_df[
+            final_results_df[metric_col].notna() & 
+            np.isfinite(final_results_df[metric_col]) &
+            (~final_results_df["AlgorithmName"].str.contains("ERROR", na=False))
+        ]
+
+        if valid_data_metric.empty:
+            if verbose:
+                logger.info(f"No valid data for metric '{metric_col}' after filtering. Skipping table for this metric.")
+            continue
+        
+        processed_any_metric = True
+        grouped = valid_data_metric.groupby("Configuration")[metric_col]
+        
+        summary_aggs = grouped.agg(
+            Count='count',
+            Mean='mean',
+            Median='median',
+            StdDev='std',
+            Min='min',
+            Max='max'
+        ).reset_index() # Reset index to make 'Configuration' a column for easier manipulation initially
+
+        # Calculate Confidence Interval
+        # scipy_stats.t.interval(confidence, df, loc=mean, scale=sem)
+        # sem = std / sqrt(count)
+        summary_aggs['SEM'] = summary_aggs['StdDev'] / np.sqrt(summary_aggs['Count'])
+        
+        # Initialize CI columns with NaNs
+        ci_col_lower_name = f'{100*(1-alpha_level):.0f}% CI Lower'
+        ci_col_upper_name = f'{100*(1-alpha_level):.0f}% CI Upper'
+        summary_aggs[ci_col_lower_name] = np.nan
+        summary_aggs[ci_col_upper_name] = np.nan
+
+        for index, row in summary_aggs.iterrows():
+            if row['Count'] >= 2 and row['SEM'] > 0: # CI is meaningful for count >= 2 and non-zero SEM
+                ci = scipy_stats.t.interval(
+                    confidence=(1 - alpha_level), 
+                    df=row['Count'] - 1, 
+                    loc=row['Mean'], 
+                    scale=row['SEM']
+                )
+                summary_aggs.loc[index, ci_col_lower_name] = ci[0]
+                summary_aggs.loc[index, ci_col_upper_name] = ci[1]
+            elif row['Count'] == 1: # SEM might be 0 or NaN if std is 0 for a single point
+                 summary_aggs.loc[index, ci_col_lower_name] = row['Mean'] # CI is just the point itself
+                 summary_aggs.loc[index, ci_col_upper_name] = row['Mean']
+
+
+        summary_df = summary_aggs.set_index("Configuration") # Set 'Configuration' as index for final display
+        summary_df = summary_df[['Count', 'Mean', 'Median', 'StdDev', ci_col_lower_name, ci_col_upper_name, 'Min', 'Max']] # Reorder and select columns
+
+
+        # Display logic
+        title_str = f"Summary Statistics for: {metric_col}"
+        float_format_cols = {
+            'Mean': '{:.3f}', 'Median': '{:.3f}', 'StdDev': '{:.3f}',
+            ci_col_lower_name: '{:.3f}', ci_col_upper_name: '{:.3f}',
+            'Min': '{:.3f}', 'Max': '{:.3f}'
+        }
+        # Adjust for metrics that might not need so many decimal places
+        if metric_col in ["Iterations", "FunctionEvaluations", "Count"]:
+            float_format_cols = {k: '{:.1f}' if v == '{:.3f}' else v for k,v in float_format_cols.items()}
+            float_format_cols['Count'] = '{:.0f}' # Ensure count is integer
+        
+        if is_notebook() and ipython_available:
+            display(Markdown(f"#### {title_str}"))
+            styled_df = summary_df.style.format(float_format_cols)
+            
+            if metric_col in ["BestFitness", "RuntimeSeconds"]:
+                styled_df = styled_df.highlight_min(subset=['Mean'], color='lightgreen')
+            # Example for "higher is better" if such a metric exists
+            # elif metric_col == "SomeScoreMetricWhereHigherIsBetter":
+            #    styled_df = styled_df.highlight_max(subset=['Mean'], color='lightgreen')
+            
+            display(styled_df)
+        else:
+            print(f"\n--- {title_str} ---")
+            # For console, apply formatting directly if possible or just print
+            try:
+                 print(summary_df.to_string(formatters={col: (lambda x, fmt_str=fmt: fmt_str.format(x) if pd.notna(x) else 'NaN') 
+                                                       for col, fmt in float_format_cols.items()}))
+            except Exception: # Fallback if direct formatting fails
+                print(summary_df.to_string())
+        
+    if not processed_any_metric and verbose:
+        logger.info("No metrics were processed or had valid data for summary statistics tables.")
+
 
 # This is the new, enhanced version of the function. 
 # The old, simpler version that caused the IndentationError has been removed.
@@ -95,13 +265,19 @@ def plot_metric_distributions_boxplots(
     plot_type: str = 'box', 
     show_points: bool = True, 
     show_significance: bool = True, 
-    alpha_level: float = 0.05
+    alpha_level: float = 0.05,
+    annotation_mode: str = 'all', # 'all', 'vs_baseline', 'selected_pairs', 'none'
+    baseline_config_name: Optional[str] = None,
+    selected_pairs_for_annotation: Optional[List[Tuple[str, str]]] = None,
+    verbose: bool = True
 ):
     if final_results_df.empty:
-        logger.info("Plotting distributions: DataFrame is empty.")
+        if verbose:
+            logger.info("Plotting distributions: DataFrame is empty.")
         return
         
-    logger.info(f"\n--- Enhanced Metric Distributions ({plot_type.capitalize()} Plots) ---")
+    if verbose:
+        logger.info(f"\n--- Enhanced Metric Distributions ({plot_type.capitalize()} Plots) ---")
     metrics_to_plot = ["BestFitness", "RuntimeSeconds", "FunctionEvaluations"] # Can be extended
 
     for metric_col in metrics_to_plot:
@@ -117,7 +293,8 @@ def plot_metric_distributions_boxplots(
         ]
 
         if valid_data_for_metric.empty:
-            logger.info(f"No valid data for metric '{metric_col}' after filtering. Skipping plot.")
+            if verbose:
+                logger.info(f"No valid data for metric '{metric_col}' after filtering. Skipping plot.")
             continue
             
         # Prepare data for statistical tests: Dict[str, List[float]]
@@ -131,7 +308,8 @@ def plot_metric_distributions_boxplots(
         }
         
         if len(groups_data_filtered) < 2: # Need at least two groups for comparison
-            logger.info(f"Metric '{metric_col}': Less than 2 configurations with sufficient data ({min_points_per_group} points) after filtering. Skipping significance testing and plot.")
+            if verbose:
+                logger.info(f"Metric '{metric_col}': Less than 2 configurations with sufficient data ({min_points_per_group} points) after filtering. Skipping significance testing and plot.")
             # Still, we can plot if there's at least one group, just no comparisons.
             if not groups_data_filtered: continue # No groups at all
         
@@ -140,7 +318,8 @@ def plot_metric_distributions_boxplots(
         plottable_data = valid_data_for_metric[valid_data_for_metric["Configuration"].isin(configs_with_enough_data)]
 
         if plottable_data.empty:
-            logger.info(f"Metric '{metric_col}': No plottable data after filtering groups by size. Skipping plot.")
+            if verbose:
+                logger.info(f"Metric '{metric_col}': No plottable data after filtering groups by size. Skipping plot.")
             continue
 
         plt.figure(figsize=(max(10, len(configs_with_enough_data) * 1.5), 7)) # Dynamic width
@@ -164,39 +343,49 @@ def plot_metric_distributions_boxplots(
 
         # Significance Annotation
         if show_significance and len(groups_data_filtered) >= 2:
-            logger.info(f"Calculating significance for {metric_col} across {len(groups_data_filtered)} configurations...")
-            
+            if verbose:
+                logger.info(f"Calculating significance for {metric_col} across {len(groups_data_filtered)} configurations...")
+                logger.info(f"Annotation mode: {annotation_mode}")
+
             overall_stat_result = su.compare_multiple_groups(groups_data_filtered, alpha=alpha_level)
-            significant_pairs_details = [] # To store details of significant pairs
+            significant_pairs_details = [] # To store details of all significant pairs for logging
 
             if overall_stat_result and overall_stat_result['significant']:
-                logger.info(f"Overall test ({overall_stat_result['test_name']}) for '{metric_col}' is significant (p={overall_stat_result['p_value']:.4f}). Performing post-hoc tests.")
+                if verbose:
+                    logger.info(f"Overall test ({overall_stat_result['test_name']}) for '{metric_col}' is significant (p={overall_stat_result['p_value']:.4f}). Performing post-hoc tests.")
+                
                 is_parametric_posthoc = overall_stat_result.get('all_normal', False) and overall_stat_result.get('equal_variances', False)
                 post_hoc_results = su.perform_post_hoc_tests(groups_data_filtered, parametric=is_parametric_posthoc, alpha=alpha_level)
                 
-                if isinstance(post_hoc_results, pd.DataFrame):
-                    # Process post_hoc_results DataFrame to find significant pairs
-                    # The DataFrame is a matrix of p-values.
-                    config_names = list(groups_data_filtered.keys()) # Order of groups as they appear in stats
-                    
-                    # Annotations can get very complex. Let's try a simplified approach.
-                    # We'll draw lines for pairs that are significant.
+                if isinstance(post_hoc_results, pd.DataFrame) and annotation_mode != 'none':
+                    config_names = list(groups_data_filtered.keys())
                     y_max = plottable_data[metric_col].max()
-                    y_offset_increment = (y_max - plottable_data[metric_col].min()) * 0.08 # Dynamic offset
-                    current_y_offset = y_max + y_offset_increment * 0.5 
-                    
+                    y_offset_increment = (y_max - plottable_data[metric_col].min()) * 0.08
+                    current_y_offset = y_max + y_offset_increment * 0.5
                     num_significant_annotated = 0
+                    max_annotations_for_all_mode = 5 # Clutter limit for 'all' mode
+
+                    # Validate baseline_config_name for 'vs_baseline' mode
+                    valid_baseline_for_mode = True
+                    if annotation_mode == 'vs_baseline':
+                        if not baseline_config_name or baseline_config_name not in config_names:
+                            if verbose:
+                                logger.warning(f"Baseline config '{baseline_config_name}' not provided or not in available data for metric '{metric_col}'. Skipping visual annotations.")
+                            valid_baseline_for_mode = False
+                    
+                    # Validate selected_pairs_for_annotation for 'selected_pairs' mode
+                    valid_selected_pairs_for_mode = True
+                    if annotation_mode == 'selected_pairs':
+                        if not selected_pairs_for_annotation:
+                            if verbose:
+                                logger.warning(f"Annotation mode is 'selected_pairs' but no pairs provided. Skipping visual annotations for metric '{metric_col}'.")
+                            valid_selected_pairs_for_mode = False
+
                     for i in range(len(config_names)):
                         for j in range(i + 1, len(config_names)):
                             group1_name = config_names[i]
                             group2_name = config_names[j]
                             
-                            # Ensure names match what's in post_hoc_results (can depend on sorting by scikit-posthocs)
-                            # This simple indexing assumes post_hoc_results columns/index match config_names order.
-                            # This might not be robust if scikit-posthocs reorders.
-                            # A safer way is to access p_values using group names: post_hoc_results.loc[group1_name, group2_name]
-                            # but scikit-posthocs might return a heatmap-like square df or a condensed one.
-                            # For now, assuming square df from posthoc_ttest/dunn
                             p_val_pair = None
                             if group1_name in post_hoc_results.index and group2_name in post_hoc_results.columns:
                                 p_val_pair = post_hoc_results.loc[group1_name, group2_name]
@@ -206,16 +395,30 @@ def plot_metric_distributions_boxplots(
                             if p_val_pair is not None and p_val_pair < alpha_level:
                                 significant_pairs_details.append(f"{group1_name} vs {group2_name}: p={p_val_pair:.4f}")
                                 
-                                # Simplified visual annotation (max 3-5 annotations to avoid clutter)
-                                if num_significant_annotated < 5:
-                                    # Get x-coordinates for the boxes/violins
-                                    # This assumes configurations are plotted in the order of unique names found by seaborn
-                                    # which should match list(groups_data_filtered.keys()) if data is sorted by config name for plotting
+                                # Determine if this pair should be visually annotated
+                                should_annotate_pair = False
+                                if annotation_mode == 'all':
+                                    if num_significant_annotated < max_annotations_for_all_mode:
+                                        should_annotate_pair = True
+                                    elif num_significant_annotated == max_annotations_for_all_mode and verbose:
+                                        logger.info(f"Reached max ({max_annotations_for_all_mode}) visual annotations for '{metric_col}' in 'all' mode to avoid clutter.")
+                                        num_significant_annotated += 1 # Increment to stop further logging of this message
+                                
+                                elif annotation_mode == 'vs_baseline' and valid_baseline_for_mode:
+                                    if group1_name == baseline_config_name or group2_name == baseline_config_name:
+                                        should_annotate_pair = True
+                                
+                                elif annotation_mode == 'selected_pairs' and valid_selected_pairs_for_mode and selected_pairs_for_annotation:
+                                    pair_tuple = tuple(sorted((group1_name, group2_name)))
+                                    if any(tuple(sorted(p)) == pair_tuple for p in selected_pairs_for_annotation):
+                                        should_annotate_pair = True
+                                
+                                if should_annotate_pair:
                                     try:
                                         x1 = configs_with_enough_data.index(group1_name)
                                         x2 = configs_with_enough_data.index(group2_name)
                                     except ValueError:
-                                        logger.warning(f"Could not find {group1_name} or {group2_name} in plotted categories for annotation. Skipping this pair.")
+                                        if verbose: logger.warning(f"Could not find {group1_name} or {group2_name} in plotted categories for annotation. Skipping this pair.")
                                         continue
 
                                     line_x = [x1, x1, x2, x2]
@@ -230,22 +433,26 @@ def plot_metric_distributions_boxplots(
                                         
                                     ax.text((x1 + x2) / 2, current_y_offset + y_offset_increment*0.25, p_text, 
                                             ha='center', va='bottom', color='black', fontsize=9)
-                                    current_y_offset += y_offset_increment # Increment for next annotation line
-                                    num_significant_annotated +=1
-                                else:
-                                    if num_significant_annotated == 5: # Log only once
-                                         logger.info("Reached max number of visual annotations for significance to avoid clutter.")
-                                         num_significant_annotated +=1 # prevent re-logging
-
-                    if significant_pairs_details:
-                        logger.info(f"Significant pairwise differences for '{metric_col}' (alpha={alpha_level}):")
+                                    current_y_offset += y_offset_increment 
+                                    if annotation_mode == 'all': # Only increment counter for 'all' mode's limit
+                                        num_significant_annotated +=1
+                    
+                    # Log all significant pairs found, regardless of visual annotation (if verbose)
+                    if significant_pairs_details and verbose:
+                        logger.info(f"All significant pairwise differences for '{metric_col}' (alpha={alpha_level}):")
                         for detail in significant_pairs_details: logger.info(f"  - {detail}")
-                    else:
+                    elif verbose:
                         logger.info(f"No significant pairwise differences found after post-hoc for '{metric_col}'.")
 
-            elif overall_stat_result: # Overall test was not significant
-                logger.info(f"Overall test ({overall_stat_result['test_name']}) for '{metric_col}' is not significant (p={overall_stat_result['p_value']:.4f}). No post-hoc tests performed.")
-            else: # overall_stat_result was None (e.g. error in su.compare_multiple_groups)
+                elif verbose: # If post_hoc_results is not a DataFrame or annotation_mode is 'none'
+                    if annotation_mode == 'none':
+                        logger.info(f"Visual annotations skipped for '{metric_col}' due to annotation_mode='none'.")
+                    elif not isinstance(post_hoc_results, pd.DataFrame):
+                        logger.warning(f"Post-hoc results for '{metric_col}' not in expected DataFrame format. Skipping visual annotations.")
+
+            elif overall_stat_result and verbose: # Overall test was not significant
+                logger.info(f"Overall test ({overall_stat_result['test_name']}) for '{metric_col}' is not significant (p={overall_stat_result['p_value']:.4f}). No post-hoc tests or visual annotations performed.")
+            elif verbose: # overall_stat_result was None or other issue
                  logger.warning(f"Could not perform overall statistical test for '{metric_col}'. Skipping significance annotations.")
 
         plt.tight_layout()
@@ -260,19 +467,23 @@ from typing import Dict, List, Any, Optional # Ensure this is imported
 def plot_convergence_curves(
     final_history_map: Dict[str, Dict[int, List[Dict[str, Any]]]],
     # metric_key_override: Optional[str] = None # This was in plan, but fitness key detection is better
+    verbose: bool = True
 ):
     if not final_history_map:
-        logger.info("No history data provided for convergence plots.")
+        if verbose:
+            logger.info("No history data provided for convergence plots.")
         return
 
-    logger.info("\n--- Aggregated Convergence Plots (Mean +/- 1 Std Dev) ---")
+    if verbose:
+        logger.info("\n--- Aggregated Convergence Plots (Mean +/- 1 Std Dev) ---")
     
     # Filter out configurations that might have empty run data
     valid_configs_data = {
         cfg_name: runs for cfg_name, runs in final_history_map.items() if runs and isinstance(runs, dict)
     }
     if not valid_configs_data:
-        logger.info("No valid configuration data found in history_map for convergence plots.")
+        if verbose:
+            logger.info("No valid configuration data found in history_map for convergence plots.")
         return
 
     num_configs = len(valid_configs_data)
@@ -284,7 +495,8 @@ def plot_convergence_curves(
     if num_configs == 1:
         rows, cols = 1, 1
     elif num_configs == 0:
-        logger.info("No configurations with data to plot.")
+        if verbose:
+            logger.info("No configurations with data to plot.")
         return
 
     fig, axes = plt.subplots(rows, cols, figsize=(8 * cols, 6 * rows), squeeze=False)
@@ -309,6 +521,8 @@ def plot_convergence_curves(
 
         for run_id, history_list_of_dicts in runs_data.items():
             if not history_list_of_dicts or not isinstance(history_list_of_dicts, list):
+                # This is a debug message, typically not controlled by main verbose, but can be if desired.
+                # For now, let's assume debug messages are less critical for user-facing verbosity.
                 logger.debug(f"Convergence Plot: Config '{config_name}', Run {run_id}: History is empty or not a list. Skipping this run.")
                 continue
 
@@ -341,11 +555,13 @@ def plot_convergence_curves(
                 if len(current_run_trajectory) > max_len:
                     max_len = len(current_run_trajectory)
             else:
+                # Debug message, not typically controlled by verbose.
                 logger.debug(f"Convergence Plot: Config '{config_name}', Run {run_id}: Trajectory is empty after processing. Skipping this run.")
 
 
         if not all_runs_fitness_trajectories:
-            logger.info(f"Config '{config_name}': No valid fitness trajectories found across all runs.")
+            if verbose:
+                logger.info(f"Config '{config_name}': No valid fitness trajectories found across all runs.")
             ax.text(0.5, 0.5, "No Valid Data", ha="center", va="center", transform=ax.transAxes)
             ax.set_title(f"Convergence: {config_name} (No Valid Data)", fontsize=12)
             plot_idx += 1
@@ -360,7 +576,8 @@ def plot_convergence_curves(
             padded_trajectories.append(traj + padding)
         
         if not padded_trajectories: # If after padding, still no data (e.g. all original trajectories were empty)
-            logger.info(f"Config '{config_name}': No data after padding trajectories.")
+            if verbose:
+                logger.info(f"Config '{config_name}': No data after padding trajectories.")
             ax.text(0.5, 0.5, "No Data After Padding", ha="center", va="center", transform=ax.transAxes)
             ax.set_title(f"Convergence: {config_name} (No Data After Padding)", fontsize=12)
             plot_idx += 1
@@ -403,12 +620,14 @@ def plot_final_fitness_distributions(
     final_results_df: pd.DataFrame, 
     metric_col: str = 'BestFitness', 
     config_col: str = 'Configuration', 
-    plot_type: str = 'hist_kde'
+    plot_type: str = 'hist_kde',
+    verbose: bool = True
 ):
     """
     Visualizes the distribution of final 'BestFitness' values for each algorithm configuration.
     """
-    logger.info(f"\n--- Final '{metric_col}' Distributions ({plot_type}) ---")
+    if verbose:
+        logger.info(f"\n--- Final '{metric_col}' Distributions ({plot_type}) ---")
 
     if final_results_df.empty:
         logger.warning(f"Plotting '{metric_col}' distributions: final_results_df is empty. Skipping.")
@@ -463,7 +682,8 @@ def plot_final_fitness_distributions(
         config_specific_fitness_values = valid_data[valid_data[config_col] == config_name][metric_col]
 
         if config_specific_fitness_values.empty:
-            logger.info(f"No valid '{metric_col}' data for configuration '{config_name}'. Plotting empty subplot.")
+                if verbose:
+                    logger.info(f"No valid '{metric_col}' data for configuration '{config_name}'. Plotting empty subplot.")
             ax.text(0.5, 0.5, "No Data", ha="center", va="center", transform=ax.transAxes)
             ax.set_title(f"{config_name}\n(No Data)", fontsize=12)
             plot_idx += 1
@@ -500,12 +720,14 @@ def plot_time_to_target(
     target_fitness_values: List[float], 
     max_evaluations: Optional[int] = None, 
     # config_col: str = 'Configuration' # Not directly needed as final_history_map keys are configs
+    verbose: bool = True
 ):
     """
     Generates Time-to-Target (Attainment) plots.
     Shows the proportion of runs that reached a target fitness by a certain evaluation/generation.
     """
-    logger.info("\n--- Time-to-Target (Attainment) Plots ---")
+    if verbose:
+        logger.info("\n--- Time-to-Target (Attainment) Plots ---")
 
     if not final_history_map:
         logger.warning("Time-to-Target: final_history_map is empty. Skipping plot.")
@@ -530,10 +752,12 @@ def plot_time_to_target(
             logger.warning("Time-to-Target: Could not determine max_evaluations from history data (all histories might be empty). Skipping plot.")
             return
         max_evaluations_to_use = determined_max_evals
-        logger.info(f"Time-to-Target: max_evaluations determined dynamically as {max_evaluations_to_use}.")
+        if verbose:
+            logger.info(f"Time-to-Target: max_evaluations determined dynamically as {max_evaluations_to_use}.")
     else:
         max_evaluations_to_use = max_evaluations
-        logger.info(f"Time-to-Target: Using provided max_evaluations: {max_evaluations_to_use}.")
+        if verbose:
+            logger.info(f"Time-to-Target: Using provided max_evaluations: {max_evaluations_to_use}.")
 
 
     plt.figure(figsize=(12, 7))
@@ -625,11 +849,13 @@ def plot_time_to_target(
 def plot_island_model_diagnostics(
     final_history_map: Dict[str, Dict[int, List[Dict[str, Any]]]],
     # config_col: str = 'Configuration' # Implicitly handled by final_history_map keys
+    verbose: bool = True
 ):
     """
     Visualizes per-island convergence and diversity metrics for Island Model GA configurations.
     """
-    logger.info("\n--- Island Model GA Diagnostics ---")
+    if verbose:
+        logger.info("\n--- Island Model GA Diagnostics ---")
 
     if not final_history_map:
         logger.warning("Island Model Plot: final_history_map is empty. Skipping.")
@@ -661,11 +887,12 @@ def plot_island_model_diagnostics(
         )
 
         if not is_island_model_history:
-            logger.debug(f"Island Model Plot: Config '{config_name}' does not appear to be an Island Model. Skipping.")
+            logger.debug(f"Island Model Plot: Config '{config_name}' does not appear to be an Island Model. Skipping.") # Debug, not verbose controlled
             continue
         
         island_model_configs_found = True
-        logger.info(f"Processing Island Model diagnostics for configuration: {config_name}")
+        if verbose:
+            logger.info(f"Processing Island Model diagnostics for configuration: {config_name}")
 
         num_islands = 0
         if first_history_item['islands_data']: # Check if islands_data is not empty
@@ -837,18 +1064,21 @@ def plot_island_model_diagnostics(
             plt.show()
 
     if not island_model_configs_found:
-        logger.info("Island Model Plot: No Island Model configurations found in the provided history data.")
+        if verbose:
+            logger.info("Island Model Plot: No Island Model configurations found in the provided history data.")
 
 
 def plot_ga_diversity_metrics(
     final_history_map: Dict[str, Dict[int, List[Dict[str, Any]]]],
     # config_col: str = 'Configuration' # Not directly needed as keys are configs
+    verbose: bool = True
 ):
     """
     Visualizes population diversity metrics (phenotypic and genotypic) over generations 
     for Genetic Algorithm configurations.
     """
-    logger.info("\n--- GA Population Diversity Metrics Over Generations ---")
+    if verbose:
+        logger.info("\n--- GA Population Diversity Metrics Over Generations ---")
 
     if not final_history_map:
         logger.warning("GA Diversity Plot: final_history_map is empty. Skipping plot.")
@@ -858,14 +1088,14 @@ def plot_ga_diversity_metrics(
 
     for config_name, runs_data in final_history_map.items():
         if not runs_data or not isinstance(runs_data, dict) or not runs_data.values():
-            logger.debug(f"GA Diversity Plot: Config '{config_name}' has no runs_data or it's invalid. Skipping.")
+            logger.debug(f"GA Diversity Plot: Config '{config_name}' has no runs_data or it's invalid. Skipping.") # Debug
             continue
 
         # Check if this config is likely a standard GA by inspecting the structure of its history
         # Take the first run's history as representative
         first_run_history = next(iter(runs_data.values()), None)
         if not first_run_history or not isinstance(first_run_history, list) or not first_run_history:
-            logger.debug(f"GA Diversity Plot: Config '{config_name}' - first run history is empty/invalid. Skipping.")
+            logger.debug(f"GA Diversity Plot: Config '{config_name}' - first run history is empty/invalid. Skipping.") # Debug
             continue
         
         first_history_item = first_run_history[0]
@@ -877,7 +1107,7 @@ def plot_ga_diversity_metrics(
         )
 
         if not is_standard_ga_history:
-            logger.debug(f"GA Diversity Plot: Config '{config_name}' does not appear to be a standard GA. Skipping.")
+            logger.debug(f"GA Diversity Plot: Config '{config_name}' does not appear to be a standard GA. Skipping.") # Debug
             continue
 
         # This is likely a GA config, process its runs for diversity metrics
@@ -905,7 +1135,8 @@ def plot_ga_diversity_metrics(
                 max_len = max(max_len, len(current_run_geno_diversity)) # max_len should be consistent
 
         if not all_runs_std_fitness_trajectories and not all_runs_geno_diversity_trajectories:
-            logger.info(f"GA Diversity Plot: Config '{config_name}' - no valid diversity trajectories found.")
+            if verbose:
+                logger.info(f"GA Diversity Plot: Config '{config_name}' - no valid diversity trajectories found.")
             continue # Skip this config if no data
 
         # Pad trajectories
@@ -929,7 +1160,8 @@ def plot_ga_diversity_metrics(
         }
 
     if not ga_configs_data:
-        logger.info("GA Diversity Plot: No GA configurations with valid diversity data found. Skipping plot generation.")
+        if verbose:
+            logger.info("GA Diversity Plot: No GA configurations with valid diversity data found. Skipping plot generation.")
         return
 
     num_ga_configs = len(ga_configs_data)
@@ -1005,13 +1237,15 @@ def plot_critical_difference_diagram(
     metric_col: str = 'BestFitness', 
     config_col: str = 'Configuration', 
     run_col: str = 'Run', 
-    alpha_level: float = 0.05
+    alpha_level: float = 0.05,
+    verbose: bool = True
 ):
     """
     Generates and displays a Critical Difference (CD) diagram if results are significant.
     Uses Friedman test and Nemenyi post-hoc results.
     """
-    logger.info(f"\n--- Critical Difference Analysis for Metric: {metric_col} ---")
+    if verbose:
+        logger.info(f"\n--- Critical Difference Analysis for Metric: {metric_col} ---")
 
     if final_results_df.empty:
         logger.warning("CD Diagram: final_results_df is empty. Skipping.")
@@ -1033,13 +1267,15 @@ def plot_critical_difference_diagram(
 
     if friedman_stat is None or friedman_p_value is None:
         logger.warning(f"CD Diagram: Friedman test did not yield valid statistic or p-value (Stat: {friedman_stat}, P-val: {friedman_p_value}). Average ranks might still be available but CD plot cannot be generated meaningfully without a test outcome.")
-        if avg_ranks is not None:
+        # The following log about avg_ranks is already conditional on verbose from previous changes.
+        if avg_ranks is not None and verbose:
             logger.info(f"Average Ranks for {metric_col}:\n{avg_ranks.sort_values()}")
         return
 
-    logger.info(f"Friedman Test for {metric_col}: Statistic={friedman_stat:.3f}, P-value={friedman_p_value:.4f}")
+    if verbose: # This is already correctly conditional
+        logger.info(f"Friedman Test for {metric_col}: Statistic={friedman_stat:.3f}, P-value={friedman_p_value:.4f}")
 
-    if avg_ranks is None or avg_ranks.empty:
+    if avg_ranks is None or avg_ranks.empty: # This is a warning, should be unconditional
         logger.warning("CD Diagram: Average ranks are not available. Cannot plot CD diagram.")
         return
         
@@ -1049,17 +1285,19 @@ def plot_critical_difference_diagram(
     sorted_avg_ranks = avg_ranks.sort_values(ascending=True)
 
     if friedman_p_value >= alpha_level:
-        logger.info(f"Friedman test for {metric_col} is not significant (p={friedman_p_value:.4f} >= {alpha_level}). "
-                    "A CD diagram is not typically shown as no overall statistical difference was detected.")
-        logger.info(f"Average Ranks for {metric_col} (lower is better):\n{sorted_avg_ranks}")
+        if verbose: # This block is correctly conditional
+            logger.info(f"Friedman test for {metric_col} is not significant (p={friedman_p_value:.4f} >= {alpha_level}). "
+                        "A CD diagram is not typically shown as no overall statistical difference was detected.")
+            logger.info(f"Average Ranks for {metric_col} (lower is better):\n{sorted_avg_ranks}")
         # Optionally, still show a plot of average ranks without significance bars if desired
         # For now, returning as per instructions if not significant.
         return
 
-    if nemenyi_results_df is None or nemenyi_results_df.empty:
+    if nemenyi_results_df is None or nemenyi_results_df.empty: # This is a warning, should be unconditional
         logger.warning(f"CD Diagram: Friedman test was significant for {metric_col}, but Nemenyi post-hoc results are unavailable or empty. "
                        "Cannot plot CD diagram. Check Nemenyi test execution.")
-        logger.info(f"Average Ranks for {metric_col} (lower is better):\n{sorted_avg_ranks}")
+        if verbose: # This part is correctly conditional
+            logger.info(f"Average Ranks for {metric_col} (lower is better):\n{sorted_avg_ranks}")
         return
 
     # Attempt to plot Critical Difference Diagram using scikit-posthocs
@@ -1069,7 +1307,8 @@ def plot_critical_difference_diagram(
     # scikit-posthocs' `sign_plot` is a more readily available alternative for visualizing Nemenyi results.
 
     try:
-        logger.info(f"Attempting to generate significance plot (e.g., sign_plot) for {metric_col} based on Nemenyi results.")
+        if verbose:
+            logger.info(f"Attempting to generate significance plot (e.g., sign_plot) for {metric_col} based on Nemenyi results.")
         
         # The sign_plot typically takes the p-value matrix (nemenyi_results_df)
         # and average ranks (sorted_avg_ranks) can be used to order/interpret it.
@@ -1093,15 +1332,25 @@ def plot_critical_difference_diagram(
         # This function creates a "significance plot" or "heatmap" of p-values.
         # It does not draw the traditional CD diagram with a number line and bars.
         sp.sign_plot(nemenyi_ordered, standardized=False) # standardized=False shows p-values
-        plt.title(f"Pairwise Significance (Nemenyi) for {metric_col}\n(Lower ranks are better; cell values are p-values)", fontsize=14)
+        
+        # Adaptive title font size
+        title_font_size = 14
+        num_configs = len(sorted_avg_ranks)
+        if num_configs > 15: # Example threshold: more than 15 configs
+            title_font_size = 11
+        elif num_configs > 10: # Example threshold: more than 10 configs
+            title_font_size = 12
+            
+        plt.title(f"Pairwise Significance (Nemenyi) for {metric_col}\n(Lower ranks are better; cell values are p-values)", fontsize=title_font_size)
         # Rotate x-axis labels for better readability if many configs
         plt.xticks(rotation=45, ha='right') 
         plt.yticks(rotation=0) # Ensure y-axis labels are horizontal
         plt.tight_layout()
         plt.show()
         
-        logger.info(f"Displayed Nemenyi significance plot (sign_plot) for {metric_col}.")
-        logger.info(f"Average Ranks for {metric_col} (lower is better):\n{sorted_avg_ranks}")
+        if verbose: # These logs are now conditional
+            logger.info(f"Displayed Nemenyi significance plot (sign_plot) for {metric_col}.")
+            logger.info(f"Average Ranks for {metric_col} (lower is better):\n{sorted_avg_ranks}")
         
         # Note: A true CD diagram often requires a specific CD value and plots ranks on a line.
         # `scikit-posthocs` does not have a direct `critical_difference_diagram` function like some other libraries (e.g., Orange).
@@ -1112,21 +1361,23 @@ def plot_critical_difference_diagram(
         # 3. Draw bars connecting groups whose difference in average rank is less than the CD.
         # This manual construction is beyond the direct capabilities of `scikit-posthocs` plotting utilities.
 
-    except Exception as e_plot:
+    except Exception as e_plot: # This is an error, should be unconditional
         logger.error(f"CD Diagram: Failed to generate significance plot for {metric_col}: {e_plot}", exc_info=True)
-        logger.info("Fallback: Logging average ranks and Nemenyi p-values table.")
-        if avg_ranks is not None:
-            logger.info(f"Average Ranks for {metric_col} (lower is better):\n{avg_ranks.sort_values()}")
-        if nemenyi_results_df is not None:
-            logger.info(f"Nemenyi Post-Hoc p-values for {metric_col}:\n{nemenyi_results_df}")
+        if verbose: # Fallback logging is conditional
+            logger.info("Fallback: Logging average ranks and Nemenyi p-values table.")
+            if avg_ranks is not None: # avg_ranks check is good, verbose already applied
+                logger.info(f"Average Ranks for {metric_col} (lower is better):\n{avg_ranks.sort_values()}")
+            if nemenyi_results_df is not None: # nemenyi_results_df check is good, verbose already applied
+                logger.info(f"Nemenyi Post-Hoc p-values for {metric_col}:\n{nemenyi_results_df}")
 
 
 
-def rank_algorithms_custom(results_df: pd.DataFrame) -> pd.DataFrame or None:
+def rank_algorithms_custom(results_df: pd.DataFrame, verbose: bool = True) -> pd.DataFrame or None:
     if results_df.empty:
         logger.warning("Ranking: Input DataFrame empty.")
         return None
-    logger.info("\n--- Algorithm Performance Ranking ---")
+    if verbose:
+        logger.info("\n--- Algorithm Performance Ranking ---")
 
     valid_df = results_df[  # Ensure we only use valid, finite results for ranking
         results_df["BestFitness"].notna()
@@ -1168,7 +1419,8 @@ def rank_algorithms_custom(results_df: pd.DataFrame) -> pd.DataFrame or None:
     ranks["OverallRank"] = ranks["OverallRankScore"].rank(method="min", ascending=True)
 
     final_ranks = pd.concat([ranks, metrics], axis=1).sort_values("OverallRank")
-    logger.info("\nAlgorithm Ranking Table (Lower OverallRank is Better):")
+    if verbose:
+        logger.info("\nAlgorithm Ranking Table (Lower OverallRank is Better):")
 
     display_cols = (
         ["OverallRank"]
@@ -1197,13 +1449,16 @@ def rank_algorithms_custom(results_df: pd.DataFrame) -> pd.DataFrame or None:
 
     try:
         from IPython.display import display # type: ignore
-        display(final_ranks[existing_cols].style.format(active_fmts))
+        if verbose: # Assuming display is for verbose output
+            display(final_ranks[existing_cols].style.format(active_fmts))
     except ImportError:
-        call_fmts = {k: (lambda x, f=v: f.format(x)) for k, v in active_fmts.items()}
-        print(final_ranks[existing_cols].to_string(formatters=call_fmts))
+        if verbose:
+            call_fmts = {k: (lambda x, f=v: f.format(x)) for k, v in active_fmts.items()}
+            print(final_ranks[existing_cols].to_string(formatters=call_fmts))
 
     if "OverallRank" in final_ranks.columns:
-        plt.figure(figsize=(10, 5))
+        num_configs = len(final_ranks)
+        plt.figure(figsize=(max(10, num_configs * 0.5), 6)) # Dynamic figure size
         final_ranks["OverallRank"].sort_values().plot(
             kind="bar", color=sns.color_palette("YlOrRd_r", len(final_ranks))
         )
@@ -1224,20 +1479,23 @@ def display_single_best_solution_details(
     players_list: list,
     problem_def: dict,
     sol_module,  # Pass the imported 'solution' module (e.g., import solution as sol_module)
+    verbose: bool = True
 ):
     """
     Displays detailed statistics and visualizations for the single overall best solution.
     This function is intended to be called from the main experiment script.
     """
     if not best_sol_data:
-        logger.info(
-            "No best solution data provided to display_single_best_solution_details."
-        )
+        if verbose:
+            logger.info(
+                "No best solution data provided to display_single_best_solution_details."
+            )
         return
 
-    logger.info(
-        f"\n--- Detailed Analysis: Best Solution from '{config_name}', Run {run_num} (Fitness: {fitness:.4f}) ---"
-    )
+    if verbose:
+        logger.info(
+            f"\n--- Detailed Analysis: Best Solution from '{config_name}', Run {run_num} (Fitness: {fitness:.4f}) ---"
+        )
 
     # Recreate the solution object using the utility function (also in this file or imported)
     # and the passed solution module reference.
@@ -1246,7 +1504,7 @@ def display_single_best_solution_details(
     )
 
     if not best_obj:
-        logger.error(
+        logger.error( # Error, not verbose controlled
             "Could not recreate the best solution object for detailed display. Aborting details."
         )
         return
@@ -1256,10 +1514,11 @@ def display_single_best_solution_details(
     recalculated_fitness_val = (
         best_obj.fitness()
     )  # This call uses the original .fitness()
-    logger.info(
-        f"Recreated Best Solution: Is Valid = {is_recreated_valid}, Recalculated Fitness = {recalculated_fitness_val:.4f}"
-    )
-    if not is_recreated_valid:
+    if verbose: # This is informational about the recreated object
+        logger.info(
+            f"Recreated Best Solution: Is Valid = {is_recreated_valid}, Recalculated Fitness = {recalculated_fitness_val:.4f}"
+        )
+    if not is_recreated_valid: # This is a warning, always show
         logger.warning(
             "The recreated overall best solution is flagged as INVALID. Displayed statistics might be misleading or incomplete."
         )
@@ -1267,42 +1526,43 @@ def display_single_best_solution_details(
     # Get detailed team statistics from the solution object
     team_stats_list = best_obj.get_team_stats()
     if not team_stats_list:
-        logger.warning(
+        logger.warning( # Warning, always show
             "No team statistics could be generated for the overall best solution."
         )
         return
 
-    logger.info("\n--- Detailed Team Breakdown for Overall Best Solution ---")
-    for team_stat_item in team_stats_list:
-        # Using print for potentially better multi-line formatting in console for these details
-        print(f"\nTeam {team_stat_item.get('team_id', 'N/A')}:")
-        print(
-            f"  Players ({team_stat_item.get('num_players',0)}): {team_stat_item.get('players_names', [])}"
-        )
-        print(f"  Avg Skill: {team_stat_item.get('avg_skill', 0.0):.2f}")
-        print(
-            f"  Total Salary: {team_stat_item.get('total_salary', 0.0):.2f} (Budget Limit: {problem_def.get('max_budget', 'N/A')})"
-        )
-        print(
-            f"  Actual Positions: {team_stat_item.get('positions', {})} (Required: {problem_def.get('position_requirements', {})})"
-        )
-
-        # Inline validity checks for quick visual reference during display
-        if team_stat_item.get("total_salary", 0.0) > problem_def.get(
-            "max_budget", float("inf")
-        ):
-            print("    🔴 WARNING: TEAM BUDGET EXCEEDED!")
-        if team_stat_item.get("positions", {}) != problem_def.get(
-            "position_requirements", {}
-        ):
-            print("    🔴 WARNING: TEAM POSITIONAL MISMATCH!")
-        if team_stat_item.get("num_players", 0) != problem_def.get(
-            "team_size", -1
-        ):  # Compare with problem_def team_size
+    if verbose:
+        logger.info("\n--- Detailed Team Breakdown for Overall Best Solution ---")
+        for team_stat_item in team_stats_list:
+            # Using print for potentially better multi-line formatting in console for these details
+            print(f"\nTeam {team_stat_item.get('team_id', 'N/A')}:")
             print(
-                f"    🔴 WARNING: TEAM SIZE IS {team_stat_item.get('num_players',0)}, "
-                f"EXPECTED {problem_def.get('team_size',-1)}!"
+                f"  Players ({team_stat_item.get('num_players',0)}): {team_stat_item.get('players_names', [])}"
             )
+            print(f"  Avg Skill: {team_stat_item.get('avg_skill', 0.0):.2f}")
+            print(
+                f"  Total Salary: {team_stat_item.get('total_salary', 0.0):.2f} (Budget Limit: {problem_def.get('max_budget', 'N/A')})"
+            )
+            print(
+                f"  Actual Positions: {team_stat_item.get('positions', {})} (Required: {problem_def.get('position_requirements', {})})"
+            )
+
+            # Inline validity checks for quick visual reference during display
+            if team_stat_item.get("total_salary", 0.0) > problem_def.get(
+                "max_budget", float("inf")
+            ):
+                print("    🔴 WARNING: TEAM BUDGET EXCEEDED!") # These warnings within verbose block are fine as they relate to printed details
+            if team_stat_item.get("positions", {}) != problem_def.get(
+                "position_requirements", {}
+            ):
+                print("    🔴 WARNING: TEAM POSITIONAL MISMATCH!")
+            if team_stat_item.get("num_players", 0) != problem_def.get(
+                "team_size", -1
+            ):  # Compare with problem_def team_size
+                print(
+                    f"    🔴 WARNING: TEAM SIZE IS {team_stat_item.get('num_players',0)}, "
+                    f"EXPECTED {problem_def.get('team_size',-1)}!"
+                )
 
     # Create a DataFrame from the team statistics for easier plotting
     team_stats_df_best_plot = pd.DataFrame(team_stats_list)
@@ -1473,9 +1733,10 @@ def display_single_best_solution_details(
             "Could not generate position distribution plot: 'positions' data column missing or empty in team_stats_df_best_plot."
         )
 
-    logger.info(
-        f"--- End of Detailed Analysis for Overall Best Solution ({config_name}) ---"
-    )
+        if verbose: # End of analysis message
+            logger.info(
+                f"--- End of Detailed Analysis for Overall Best Solution ({config_name}) ---"
+            )
 
 
 def display_best_solution_per_configuration_table(
@@ -1483,15 +1744,18 @@ def display_best_solution_per_configuration_table(
     master_players_list: List[Dict],
     problem_def: Dict[str, Any],
     sol_module: Any, # The imported solution module
-    top_n: Optional[int] = None
+    top_n: Optional[int] = None,
+    verbose: bool = True
 ) -> None:
     """
     Displays a table of the best solution found by each algorithm configuration.
     """
-    logger.info("\n--- Best Solution Found by Each Algorithm Configuration ---")
+    if verbose:
+        logger.info("\n--- Best Solution Found by Each Algorithm Configuration ---")
 
     if not best_solutions_map:
-        logger.info("No best solutions data available to display.")
+        if verbose: # Only log this if verbose, it's not a warning, just info.
+            logger.info("No best solutions data available to display.")
         return
 
     table_data = []
@@ -1556,7 +1820,8 @@ def display_best_solution_per_configuration_table(
         })
 
     if not table_data:
-        logger.info("No solution data processed for the table.")
+        if verbose: # Informational
+            logger.info("No solution data processed for the table.")
         return
 
     df = pd.DataFrame(table_data)
@@ -1572,10 +1837,392 @@ def display_best_solution_per_configuration_table(
     pd.set_option('display.width', 1000) # Adjust as needed, might be too wide for some consoles
     pd.set_option('display.max_colwidth', 200) # Show more of the solution representation
 
-    logger.info("Best solutions per configuration table:")
-    # Use print for better table formatting in typical console outputs than logger.info
-    print(df.to_string(index=False))
+    if verbose:
+        logger.info("Best solutions per configuration table:")
+        if is_notebook() and ipython_available:
+            # escape=True is important for security if data might contain HTML/JS
+            display(HTML(df.to_html(index=False, escape=True)))
+        else:
+            # Use print for better table formatting in typical console outputs than logger.info
+            print(df.to_string(index=False))
 
     # Reset pandas display options to original
     pd.set_option('display.width', original_width)
     pd.set_option('display.max_colwidth', original_max_colwidth)
+
+
+def plot_overall_best_fitness_convergence(
+    history_data_dict: Dict[str, Dict[int, List[Dict[str, Any]]]],
+    metric_to_plot_vs: str = 'Evaluations', # 'Evaluations' or 'RuntimeSeconds'
+    verbose: bool = True
+) -> None:
+    """
+    Plots the overall best fitness convergence for each configuration, 
+    showing the best fitness found up to a certain point (evaluations, runtime, or step).
+    This plot aggregates data from all runs of a configuration.
+    """
+    if not verbose:
+        # This function relies on display_plot_info being called by the caller
+        # for verbose descriptions. Direct calls might not have that context.
+        # logger.info("Plotting overall best fitness convergence (verbose mode off).")
+        pass
+
+    if not history_data_dict:
+        if verbose:
+            logger.warning("Overall Best Fitness Convergence Plot: History data dictionary is empty. Skipping plot.")
+        return
+    
+    plt.figure(figsize=(12, 8))
+    
+    # Define potential keys for fitness and x-axis metrics
+    fitness_keys = ['global_best_fitness', 'best_fitness']
+    eval_keys = ['cumulative_evaluations', 'FunctionEvaluations', 'evaluations']
+    runtime_keys = ['cumulative_runtime', 'RuntimeSeconds', 'runtime']
+
+    actual_x_axis_label = "Step/Generation" # Default
+    using_index_fallback = False
+
+    for config_name, runs_data in history_data_dict.items():
+        if not runs_data or not isinstance(runs_data, dict):
+            if verbose:
+                logger.debug(f"Overall Best Fitness Plot: Config '{config_name}' has no runs_data or it's invalid. Skipping.")
+            continue
+
+        all_points_for_config: List[Tuple[float, float]] = []
+
+        for run_id, history_list in runs_data.items():
+            if not history_list or not isinstance(history_list, list):
+                if verbose:
+                    logger.debug(f"Overall Best Fitness Plot: Config '{config_name}', Run {run_id}: History is empty/invalid. Skipping run.")
+                continue
+
+            cumulative_x_offset = 0 # Used if actual x-values are per-step and need accumulation (less common for this plot type)
+                                    # Primarily, we expect cumulative values directly in history or use index.
+
+            for idx, step_data in enumerate(history_list):
+                if not isinstance(step_data, dict):
+                    if verbose:
+                        logger.warning(f"Overall Best Fitness Plot: Config '{config_name}', Run {run_id}, Step {idx}: step_data is not a dict. Skipping step.")
+                    continue
+
+                fitness_value = None
+                for fk in fitness_keys:
+                    if fk in step_data and pd.notna(step_data[fk]):
+                        fitness_value = step_data[fk]
+                        break
+                
+                if fitness_value is None:
+                    if verbose:
+                         logger.debug(f"Overall Best Fitness Plot: Config '{config_name}', Run {run_id}, Step {idx}: No valid fitness key found. Skipping step.")
+                    continue
+
+                x_value = float(idx) # Default to index
+                current_x_axis_label_candidate = "Step/Generation"
+                
+                found_specific_x_key = False
+                if metric_to_plot_vs == 'Evaluations':
+                    current_x_axis_label_candidate = "Evaluations"
+                    for xk in eval_keys:
+                        if xk in step_data and pd.notna(step_data[xk]):
+                            x_value = float(step_data[xk])
+                            found_specific_x_key = True
+                            break
+                elif metric_to_plot_vs == 'RuntimeSeconds':
+                    current_x_axis_label_candidate = "Runtime (seconds)"
+                    for xk in runtime_keys:
+                        if xk in step_data and pd.notna(step_data[xk]):
+                            x_value = float(step_data[xk])
+                            found_specific_x_key = True
+                            break
+                
+                if idx == 0 and not using_index_fallback: # Set label based on first valid data point
+                    actual_x_axis_label = current_x_axis_label_candidate
+
+                if metric_to_plot_vs in ['Evaluations', 'RuntimeSeconds'] and not found_specific_x_key:
+                    if idx == 0 and run_id == next(iter(runs_data.keys())): # Log warning only once per config
+                         if verbose:
+                            logger.warning(f"Overall Best Fitness Plot: Config '{config_name}': X-axis key for '{metric_to_plot_vs}' not found in history items. Defaulting to step index for x-axis.")
+                    using_index_fallback = True # If any config defaults to index, label should reflect that
+                    actual_x_axis_label = "Step/Generation" # Global fallback label if any config uses index
+                
+                all_points_for_config.append((x_value, float(fitness_value)))
+
+        if not all_points_for_config:
+            if verbose:
+                logger.info(f"Overall Best Fitness Plot: Config '{config_name}': No plottable points after processing all runs.")
+            continue
+
+        # Sort all collected points by x_value
+        all_points_for_config.sort(key=lambda p: p[0])
+
+        # Compute the "best-so-far" trajectory from the aggregated points
+        best_so_far_trajectory: List[Tuple[float, float]] = []
+        current_min_fitness = float('inf')
+        if all_points_for_config:
+            # Add a point at x=0 if not present, using the first known best fitness
+            # This ensures plots start from a common visual origin if x-values don't start at 0.
+            # However, for 'steps-post', the visual start is handled by the first point itself.
+            # If x-values can be non-zero and we want to show a line from 0, more complex logic is needed.
+            # For now, assume x-values capture the start correctly or index starts at 0.
+
+            for x_val, fit_val in all_points_for_config:
+                current_min_fitness = min(current_min_fitness, fit_val)
+                # Avoid adding duplicate x-values with only updated y if the true x hasn't changed
+                # This is important for 'steps-post' to correctly represent plateaus.
+                if not best_so_far_trajectory or best_so_far_trajectory[-1][0] != x_val:
+                    best_so_far_trajectory.append((x_val, current_min_fitness))
+                elif best_so_far_trajectory[-1][1] > current_min_fitness : # x_val is same, but fitness improved
+                    best_so_far_trajectory[-1] = (x_val, current_min_fitness)
+
+
+        if not best_so_far_trajectory:
+            if verbose:
+                logger.info(f"Overall Best Fitness Plot: Config '{config_name}': Best-so-far trajectory is empty. Skipping plot for this config.")
+            continue
+            
+        x_plot_values = [p[0] for p in best_so_far_trajectory]
+        y_plot_values = [p[1] for p in best_so_far_trajectory]
+        
+        # Ensure the plot extends to the last x-value if using steps-post
+        if x_plot_values and y_plot_values and len(x_plot_values) == len(y_plot_values):
+             if len(x_plot_values) > 1 and x_plot_values[-1] > x_plot_values[-2]: # Check if there's a final segment to draw
+                # Add a duplicate of the last point to make 'steps-post' draw the last segment correctly to its x-value
+                # This is often needed if the "next" x value isn't explicitly in the data.
+                # However, if data already includes all points up to a max_x, this might not be needed.
+                # Let's test without first, as drawstyle='steps-post' should handle it.
+                pass
+
+
+        plt.plot(x_plot_values, y_plot_values, label=config_name, drawstyle='steps-post', alpha=0.8, lw=1.5)
+
+    plt.title(f"Overall Best Fitness Convergence vs. {actual_x_axis_label}", fontsize=15)
+    plt.xlabel(actual_x_axis_label, fontsize=12)
+    plt.ylabel("Best Fitness Found So Far (Lower is Better)", fontsize=12)
+    
+    if len(history_data_dict) > 6: # Conditional legend placement
+        plt.legend(fontsize=9, loc='center left', bbox_to_anchor=(1, 0.5))
+        plt.tight_layout(rect=[0, 0, 0.85, 1]) # Adjust layout for external legend
+    else:
+        plt.legend(fontsize=9, loc='best')
+        plt.tight_layout()
+
+    plt.grid(True, linestyle=":", alpha=0.7)
+    plt.show()
+
+
+def plot_scatter_plot_matrix(
+    final_results_df: pd.DataFrame, 
+    metrics_to_plot: Optional[List[str]] = None, 
+    config_col: str = 'Configuration', 
+    diag_kind: str = 'auto', 
+    verbose: bool = True
+):
+    """
+    Generates a scatter plot matrix (SPLOM) to visualize pairwise relationships 
+    between different performance metrics for various algorithm configurations.
+    """
+    if not verbose:
+        return
+
+    if metrics_to_plot is None:
+        metrics_to_plot = ['BestFitness', 'RuntimeSeconds', 'FunctionEvaluations']
+
+    if not metrics_to_plot or len(metrics_to_plot) < 2:
+        if verbose: logger.info("Scatter Plot Matrix: At least two metrics are required to plot. Skipping.")
+        return
+
+    if verbose:
+        logger.info("\n--- Scatter Plot Matrix (SPLOM) for Performance Metrics ---")
+        logger.info(f"Plotting for metrics: {metrics_to_plot} with hue: {config_col}")
+
+    # Data Preparation
+    if "AlgorithmName" not in final_results_df.columns:
+        logger.warning("Scatter Plot Matrix: 'AlgorithmName' column not found. Cannot filter error runs. Proceeding with all data.")
+        plot_df = final_results_df.copy()
+    else:
+        plot_df = final_results_df[~final_results_df["AlgorithmName"].str.contains("ERROR", na=False)].copy()
+    
+    # Ensure all metrics_to_plot exist and are numeric, then drop NaNs
+    valid_metrics_to_plot = []
+    for metric in metrics_to_plot:
+        if metric not in plot_df.columns:
+            logger.warning(f"Scatter Plot Matrix: Metric '{metric}' not found in DataFrame. Skipping this metric.")
+            continue
+        if not pd.api.types.is_numeric_dtype(plot_df[metric]):
+            logger.warning(f"Scatter Plot Matrix: Metric '{metric}' is not numeric. Attempting conversion or skipping.")
+            try:
+                plot_df[metric] = pd.to_numeric(plot_df[metric], errors='coerce')
+                if plot_df[metric].isnull().all(): # If conversion results in all NaNs
+                     logger.warning(f"Scatter Plot Matrix: Metric '{metric}' became all NaNs after numeric conversion. Skipping.")
+                     continue
+            except Exception as e:
+                logger.error(f"Scatter Plot Matrix: Error converting metric '{metric}' to numeric: {e}. Skipping.")
+                continue
+        valid_metrics_to_plot.append(metric)
+    
+    if len(valid_metrics_to_plot) < 2:
+        if verbose: logger.info("Scatter Plot Matrix: Fewer than two valid numeric metrics available. Skipping plot.")
+        return
+        
+    plot_df.dropna(subset=valid_metrics_to_plot, inplace=True)
+
+    if plot_df.empty:
+        if verbose: logger.info("Scatter Plot Matrix: No data remains after filtering errors and NaNs. Skipping plot.")
+        return
+        
+    if config_col not in plot_df.columns:
+        logger.error(f"Scatter Plot Matrix: Configuration column '{config_col}' not found in DataFrame. Skipping plot.")
+        return
+
+    if plot_df[config_col].nunique() < 1: # Need at least one group to hue by, though more is typical
+        if verbose: logger.info(f"Scatter Plot Matrix: Less than 1 unique configuration found in '{config_col}'. Skipping plot.")
+        return
+
+    # Plotting
+    try:
+        g = sns.pairplot(
+            plot_df, 
+            vars=valid_metrics_to_plot, 
+            hue=config_col, 
+            diag_kind=diag_kind, 
+            palette='viridis', # Using a consistent palette
+            corner=False # Full matrix
+        )
+        g.fig.suptitle('Scatter Plot Matrix (SPLOM) of Performance Metrics', y=1.02, fontsize=16)
+        g.fig.tight_layout(rect=[0, 0, 1, 0.98]) # Adjust rect to prevent suptitle overlap
+        plt.show()
+    except Exception as e_splom:
+        logger.error(f"Scatter Plot Matrix: Error during plotting: {e_splom}", exc_info=True)
+        if 'g' in locals() and hasattr(g.fig, 'clf'): # Check if figure exists to close
+            plt.close(g.fig)
+        elif plt.gcf(): # Check if there's any current figure
+            plt.close(plt.gcf())
+
+
+
+def plot_parallel_coordinates(
+    final_results_df: pd.DataFrame, 
+    metrics_to_plot: Optional[List[str]] = None, 
+    config_col: str = 'Configuration', 
+    lower_is_better_metrics: Optional[List[str]] = None, 
+    verbose: bool = True
+):
+    """
+    Generates a parallel coordinates plot to visualize and compare the performance
+    of different algorithm configurations across multiple normalized metrics.
+    """
+    if not verbose:
+        return
+
+    # Default metrics if not provided
+    if metrics_to_plot is None:
+        metrics_to_plot = ['BestFitness', 'RuntimeSeconds', 'FunctionEvaluations']
+    if lower_is_better_metrics is None:
+        lower_is_better_metrics = ['BestFitness', 'RuntimeSeconds', 'FunctionEvaluations'] # Assume all default metrics are lower-is-better
+
+    if not metrics_to_plot:
+        if verbose: logger.info("Parallel Coordinates: No metrics specified to plot.")
+        return
+
+    if verbose:
+        logger.info("\n--- Parallel Coordinates Plot for Normalized Performance ---")
+        logger.info(f"Plotting for metrics: {metrics_to_plot}")
+        logger.info(f"Metrics where lower is better (will be inverted): {lower_is_better_metrics}")
+
+    # Data Preparation
+    if "AlgorithmName" not in final_results_df.columns:
+        logger.warning("Parallel Coordinates: 'AlgorithmName' column not found. Cannot filter error runs. Proceeding with all data.")
+        valid_data = final_results_df.copy()
+    else:
+        valid_data = final_results_df[~final_results_df["AlgorithmName"].str.contains("ERROR", na=False)].copy()
+
+    if valid_data.empty:
+        if verbose: logger.info("Parallel Coordinates: No valid data after filtering error runs. Skipping plot.")
+        return
+        
+    # Check if all metrics_to_plot are present in the DataFrame
+    missing_metrics = [m for m in metrics_to_plot if m not in valid_data.columns]
+    if missing_metrics:
+        logger.warning(f"Parallel Coordinates: The following metrics are missing from the DataFrame and will be skipped: {missing_metrics}")
+        metrics_to_plot = [m for m in metrics_to_plot if m in valid_data.columns]
+        if not metrics_to_plot:
+            if verbose: logger.info("Parallel Coordinates: No plottable metrics remain after checking columns. Skipping plot.")
+            return
+            
+    # Group by configuration and calculate mean performance
+    try:
+        mean_perf_df = valid_data.groupby(config_col)[metrics_to_plot].mean().reset_index()
+    except KeyError as e:
+        logger.error(f"Parallel Coordinates: Grouping by '{config_col}' failed. Ensure it's a valid column. Error: {e}")
+        return
+        
+    if mean_perf_df.empty or len(mean_perf_df) < 1: # Allow plotting even for a single configuration
+        if verbose: logger.info("Parallel Coordinates: Not enough data or configurations after grouping. Skipping plot.")
+        return
+
+    # Normalization
+    normalized_df = mean_perf_df.copy()
+    scaler = MinMaxScaler(feature_range=(0, 1))
+
+    for metric in metrics_to_plot:
+        if metric not in normalized_df.columns: # Should be caught by earlier check, but safeguard
+            logger.warning(f"Parallel Coordinates: Metric '{metric}' not found during normalization. Skipping this metric.")
+            continue
+        
+        # Handle potential non-numeric or all-NaN columns before scaling
+        if not pd.api.types.is_numeric_dtype(normalized_df[metric]):
+            logger.warning(f"Parallel Coordinates: Metric '{metric}' is not numeric. Skipping normalization for this metric.")
+            normalized_df[metric] = np.nan # Set to NaN to avoid errors in plotting or indicate issue
+            continue
+        
+        if normalized_df[metric].isnull().all():
+            logger.warning(f"Parallel Coordinates: Metric '{metric}' contains all NaN values. Skipping normalization for this metric.")
+            continue # Will plot as NaNs if parallel_coordinates handles it, or may need explicit drop
+
+        # Ensure column is 2D for scaler
+        metric_values = normalized_df[metric].values.reshape(-1, 1)
+        scaled_values = scaler.fit_transform(metric_values)
+        
+        if metric in lower_is_better_metrics:
+            scaled_values = 1 - scaled_values # Invert scale
+            
+        normalized_df[metric] = scaled_values.flatten()
+
+    # Plotting
+    if normalized_df.empty or config_col not in normalized_df.columns:
+         if verbose: logger.info("Parallel Coordinates: DataFrame became empty or config_col is missing before plotting. Skipping.")
+         return
+
+    plt.figure(figsize=(max(10, len(metrics_to_plot) * 2.5), 7)) # Adjusted width factor to 2.5
+    
+    try:
+        parallel_coordinates(
+            normalized_df, 
+            class_column=config_col, 
+            colormap='viridis', 
+            linewidth=1.5, 
+            alpha=0.8
+        )
+    except Exception as e_pc_plot:
+        logger.error(f"Parallel Coordinates: Error during plotting: {e_pc_plot}", exc_info=True)
+        plt.close() # Close the figure if plotting failed
+        return
+
+    plt.title('Parallel Coordinates Plot of Normalized Algorithm Performance', fontsize=15)
+    plt.ylabel('Normalized Metric Value (0=Worst, 1=Best)', fontsize=12) # Clarified Y-axis
+    plt.xlabel('Performance Metrics', fontsize=12)
+    
+    if len(metrics_to_plot) > 5:
+        plt.xticks(rotation=30, ha="right")
+    
+    plt.grid(True, axis='y', linestyle=':', alpha=0.7)
+    
+    num_unique_configs = len(mean_perf_df[config_col].unique())
+    if num_unique_configs > 6:
+        plt.legend(loc='center left', bbox_to_anchor=(1.05, 0.5), title=config_col, fontsize=9)
+        plt.tight_layout(rect=[0, 0, 0.85, 1]) # Adjust for external legend
+    else:
+        plt.legend(title=config_col, fontsize=9, loc='best') # 'best' or 'upper right' might be fine
+        plt.tight_layout()
+        
+    plt.show()
