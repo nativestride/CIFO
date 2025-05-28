@@ -1,0 +1,189 @@
+/* Animation keyframes for player movement */
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(0, 255, 133, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(0, 255, 133, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(0, 255, 133, 0);
+  }
+}
+
+/* Player movement animation */
+.player-card.moving {
+  animation: pulse 1.5s infinite;
+  transform: scale(1.05);
+  box-shadow: 0 0 10px var(--secondary-color);
+  border: 2px solid var(--secondary-color);
+  z-index: 100;
+  transition: all 0.3s ease;
+}
+
+/* Team highlight during optimization */
+.team-card.optimizing {
+  box-shadow: 0 0 15px var(--secondary-color);
+  border: 2px solid var(--secondary-color);
+  transition: all 0.3s ease;
+}
+
+/* Fitness value change animation */
+@keyframes valueChange {
+  0% {
+    background-color: var(--primary-color);
+  }
+  50% {
+    background-color: var(--secondary-color);
+  }
+  100% {
+    background-color: var(--primary-color);
+  }
+}
+
+.fitness-value.changing {
+  animation: valueChange 1s ease;
+}
+
+/* Player transfer animation container */
+.player-transfer-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1000;
+}
+
+/* Real-time metrics display */
+.metrics-display {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+  margin-top: var(--spacing-md);
+}
+
+.metric-card {
+  background-color: var(--card-bg);
+  border-radius: var(--border-radius-sm);
+  padding: var(--spacing-sm);
+  flex: 1;
+  min-width: 120px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  text-align: center;
+}
+
+.metric-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--primary-color);
+}
+
+.metric-label {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+/* Algorithm progress visualization */
+.algorithm-progress {
+  margin-top: var(--spacing-md);
+}
+
+.progress-steps {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-sm);
+}
+
+.progress-step {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background-color: var(--border-color);
+  position: relative;
+}
+
+.progress-step.active {
+  background-color: var(--secondary-color);
+}
+
+.progress-step.completed {
+  background-color: var(--primary-color);
+}
+
+.progress-line {
+  height: 4px;
+  background-color: var(--border-color);
+  flex: 1;
+  margin: 8px 5px 0;
+}
+
+.progress-line.active {
+  background-color: var(--secondary-color);
+}
+
+/* Team optimization indicator */
+.team-optimization-indicator {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: var(--border-color);
+}
+
+.team-optimization-indicator.active {
+  background-color: var(--secondary-color);
+  animation: pulse 1.5s infinite;
+}
+
+/* Player skill level visualization */
+.skill-bar {
+  height: 4px;
+  background-color: #e0e0e0;
+  border-radius: 2px;
+  margin-top: 2px;
+  overflow: hidden;
+}
+
+.skill-fill {
+  height: 100%;
+  background-color: var(--secondary-color);
+}
+
+/* Position distribution visualization */
+.position-distribution {
+  display: flex;
+  gap: 2px;
+  margin-top: var(--spacing-xs);
+}
+
+.position-count {
+  flex: 1;
+  font-size: 0.7rem;
+  text-align: center;
+  padding: 2px 0;
+  border-radius: var(--border-radius-sm);
+}
+
+.position-count.GK {
+  background-color: rgba(255, 193, 7, 0.2);
+  color: #856404;
+}
+
+.position-count.DEF {
+  background-color: rgba(40, 167, 69, 0.2);
+  color: #155724;
+}
+
+.position-count.MID {
+  background-color: rgba(23, 162, 184, 0.2);
+  color: #0c5460;
+}
+
+.position-count.FWD {
+  background-color: rgba(220, 53, 69, 0.2);
+  color: #721c24;
+}

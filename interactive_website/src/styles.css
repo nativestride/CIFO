@@ -1,0 +1,482 @@
+/* 
+ * Main styles for Fantasy League Optimization website
+ * Simplified version with focus on core visualization
+ */
+
+:root {
+  --primary-color: #4a0072;
+  --secondary-color: #7b1fa2;
+  --accent-color: #00c853;
+  --error-color: #f44336;
+  --text-color: #333;
+  --light-text: #fff;
+  --border-color: #ddd;
+  --background-color: #f5f5f5;
+  --card-background: #fff;
+  --pitch-color: #2e7d32;
+  --pitch-line-color: #fff;
+  --gk-color: #ffeb3b;
+  --def-color: #2196f3;
+  --mid-color: #4caf50;
+  --fwd-color: #f44336;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Roboto', 'Segoe UI', Arial, sans-serif;
+  line-height: 1.6;
+  color: var(--text-color);
+  background-color: var(--background-color);
+}
+
+.app {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0;
+}
+
+/* Header styles */
+.app-header {
+  background-color: var(--primary-color);
+  color: var(--light-text);
+  padding: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.8rem;
+}
+
+.algorithm-selector {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.algorithm-selector select {
+  padding: 0.5rem;
+  border: none;
+  border-radius: 4px;
+  background-color: var(--secondary-color);
+  color: var(--light-text);
+  font-size: 1rem;
+}
+
+.start-button {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 4px;
+  background-color: var(--accent-color);
+  color: var(--light-text);
+  font-weight: bold;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.start-button:hover {
+  background-color: #00a844;
+}
+
+.start-button:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+.reset-button {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 4px;
+  background-color: #ff9800;
+  color: var(--light-text);
+  font-weight: bold;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.reset-button:hover {
+  background-color: #f57c00;
+}
+
+.reset-button:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+/* Error message */
+.error-message {
+  background-color: var(--error-color);
+  color: var(--light-text);
+  padding: 0.5rem 1rem;
+  margin: 0.5rem 0;
+  border-radius: 4px;
+}
+
+/* Tabs */
+.tabs {
+  display: flex;
+  background-color: var(--secondary-color);
+}
+
+.tabs button {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  background-color: transparent;
+  color: var(--light-text);
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.tabs button:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.tabs button.active {
+  background-color: rgba(255, 255, 255, 0.2);
+  font-weight: bold;
+}
+
+/* Content */
+.content {
+  padding: 1rem;
+}
+
+/* Visualization container */
+.visualization-container {
+  display: grid;
+  grid-template-columns: 1fr 300px;
+  gap: 1rem;
+}
+
+/* Sidebar */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* Team visualization */
+.team-visualization {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1rem;
+}
+
+.team-card {
+  background-color: var(--card-background);
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+
+.team-header {
+  background-color: var(--secondary-color);
+  color: var(--light-text);
+  padding: 0.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.team-header h3 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.team-stats {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.9rem;
+}
+
+.pitch {
+  background-color: var(--pitch-color);
+  position: relative;
+  width: 100%;
+  height: 300px;
+  border: 2px solid var(--pitch-line-color);
+}
+
+.pitch-markings {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.goal-area {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 40%;
+  height: 15%;
+  border-bottom: 2px solid var(--pitch-line-color);
+  border-left: 2px solid var(--pitch-line-color);
+  border-right: 2px solid var(--pitch-line-color);
+}
+
+.center-circle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 20%;
+  height: 20%;
+  border: 2px solid var(--pitch-line-color);
+  border-radius: 50%;
+}
+
+.center-line {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background-color: var(--pitch-line-color);
+}
+
+.player {
+  position: absolute;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: var(--text-color);
+  font-weight: bold;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: transform 0.5s ease-in-out;
+}
+
+.player.gk {
+  background-color: var(--gk-color);
+}
+
+.player.def {
+  background-color: var(--def-color);
+}
+
+.player.mid {
+  background-color: var(--mid-color);
+}
+
+.player.fwd {
+  background-color: var(--fwd-color);
+}
+
+.player-tooltip {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: rgba(0, 0, 0, 0.8);
+  color: white;
+  padding: 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  z-index: 10;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.player:hover .player-tooltip {
+  opacity: 1;
+}
+
+/* Position legend */
+.position-legend {
+  display: flex;
+  gap: 1rem;
+  margin: 1rem 0;
+  flex-wrap: wrap;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.legend-color {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+}
+
+.legend-color.gk {
+  background-color: var(--gk-color);
+}
+
+.legend-color.def {
+  background-color: var(--def-color);
+}
+
+.legend-color.mid {
+  background-color: var(--mid-color);
+}
+
+.legend-color.fwd {
+  background-color: var(--fwd-color);
+}
+
+/* Real-time metrics */
+.metrics-card {
+  background-color: var(--card-background);
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  padding: 1rem;
+}
+
+.metrics-card h3 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  font-size: 1.2rem;
+  color: var(--primary-color);
+}
+
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  background-color: #e0e0e0;
+  border-radius: 4px;
+  margin: 0.5rem 0 1rem;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background-color: var(--accent-color);
+  transition: width 0.3s;
+}
+
+.metric {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.metric-label {
+  font-weight: bold;
+}
+
+.metric-value {
+  font-family: monospace;
+}
+
+/* Parameter controls */
+.parameters-card {
+  background-color: var(--card-background);
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  padding: 1rem;
+}
+
+.parameters-card h3 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  font-size: 1.2rem;
+  color: var(--primary-color);
+}
+
+.parameter {
+  margin-bottom: 1rem;
+}
+
+.parameter-label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-weight: bold;
+}
+
+.parameter-input {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+}
+
+.parameter-select {
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+}
+
+.parameter-checkbox {
+  margin-right: 0.5rem;
+}
+
+/* Algorithm explanation */
+.algorithm-explanation {
+  background-color: var(--card-background);
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  padding: 1rem;
+}
+
+.algorithm-explanation h2 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  color: var(--primary-color);
+}
+
+.algorithm-explanation p {
+  margin-bottom: 1rem;
+}
+
+.algorithm-explanation ul {
+  margin-bottom: 1rem;
+  padding-left: 1.5rem;
+}
+
+/* Animation for player movements */
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.7);
+  }
+  
+  50% {
+    transform: scale(1.1);
+    box-shadow: 0 0 0 10px rgba(255, 255, 255, 0);
+  }
+  
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+  }
+}
+
+.player.moving {
+  animation: pulse 1s infinite;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .app-header {
+    flex-direction: column;
+    gap: 1rem;
+  }
+  
+  .visualization-container {
+    grid-template-columns: 1fr;
+  }
+  
+  .team-visualization {
+    grid-template-columns: 1fr;
+  }
+}

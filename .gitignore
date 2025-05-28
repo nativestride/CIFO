@@ -1,0 +1,19 @@
+# Arquivos a ignorar
+__pycache__/
+*.py[cod]
+*.class
+*.so
+.env
+.venv
+env/
+venv/
+ENV/
+node_modules/
+.DS_Store
+*.log
+*.db
+dist/
+build/
+.idea/
+.vscode/
+

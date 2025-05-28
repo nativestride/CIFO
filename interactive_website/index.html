@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fantasy League Optimization</title>
+    <style>
+      :root {
+        font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+        line-height: 1.5;
+        font-weight: 400;
+        color-scheme: light dark;
+        color: rgba(255, 255, 255, 0.87);
+        background-color: #242424;
+        font-synthesis: none;
+        text-rendering: optimizeLegibility;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+
+      body {
+        margin: 0;
+        display: flex;
+        min-width: 320px;
+        min-height: 100vh;
+      }
+
+      #root {
+        width: 100%;
+        max-width: 1280px;
+        margin: 0 auto;
+        padding: 2rem;
+      }
+
+      .app-header {
+        text-align: center;
+        margin-bottom: 2rem;
+      }
+
+      .app-header h1 {
+        font-size: 2.5em;
+        margin-bottom: 0.5rem;
+      }
+
+      .algorithm-buttons {
+        display: flex;
+        justify-content: center;
+        gap: 1rem;
+        margin: 1rem 0;
+      }
+
+      .algorithm-buttons button {
+        padding: 0.6em 1.2em;
+        font-size: 1em;
+        font-weight: 500;
+        border-radius: 8px;
+        border: 1px solid transparent;
+        background-color: #1a1a1a;
+        cursor: pointer;
+        transition: border-color 0.25s;
+      }
+
+      .algorithm-buttons button:hover {
+        border-color: #646cff;
+      }
+
+      .algorithm-buttons button.active {
+        background-color: #646cff;
+        color: white;
+      }
+
+      .optimization-panel {
+        display: grid;
+        grid-template-columns: 1fr 2fr;
+        gap: 2rem;
+        margin-bottom: 2rem;
+      }
+
+      .parameter-controls {
+        background-color: #1a1a1a;
+        padding: 1.5rem;
+        border-radius: 8px;
+      }
+
+      .constraint-group, .algorithm-params {
+        margin-bottom: 1.5rem;
+      }
+
+      .position-controls {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.5rem;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 0.5rem;
+      }
+
+      input, select {
+        padding: 0.5rem;
+        border-radius: 4px;
+        border: 1px solid #444;
+        background-color: #333;
+        color: white;
+        width: 100%;
+        box-sizing: border-box;
+      }
+
+      .control-buttons {
+        display: flex;
+        gap: 1rem;
+      }
+
+      .run-button, .reset-button {
+        padding: 0.6em 1.2em;
+        font-size: 1em;
+        font-weight: 500;
+        border-radius: 8px;
+        border: 1px solid transparent;
+        cursor: pointer;
+        transition: background-color 0.25s;
+      }
+
+      .run-button {
+        background-color: #646cff;
+        color: white;
+      }
+
+      .reset-button {
+        background-color: #333;
+        color: white;
+      }
+
+      .progress-bar {
+        height: 10px;
+        background-color: #333;
+        border-radius: 5px;
+        margin: 1rem 0;
+        overflow: hidden;
+      }
+
+      .progress-fill {
+        height: 100%;
+        background-color: #646cff;
+        transition: width 0.3s ease;
+      }
+
+      .status-message {
+        font-size: 0.9em;
+        color: #aaa;
+      }
+
+      .visualization-section {
+        background-color: #1a1a1a;
+        padding: 1.5rem;
+        border-radius: 8px;
+        min-height: 400px;
+      }
+
+      .results-panel {
+        background-color: #1a1a1a;
+        padding: 1.5rem;
+        border-radius: 8px;
+        margin-bottom: 2rem;
+      }
+
+      .results-summary {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+      }
+
+      .result-card {
+        background-color: #333;
+        padding: 1rem;
+        border-radius: 8px;
+        text-align: center;
+      }
+
+      .result-value {
+        font-size: 1.5em;
+        font-weight: bold;
+        color: #646cff;
+      }
+
+      .team-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 1rem;
+      }
+
+      .team-table th, .team-table td {
+        padding: 0.5rem;
+        text-align: left;
+        border-bottom: 1px solid #444;
+      }
+
+      .team-stats {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1rem;
+      }
+
+      .app-footer {
+        text-align: center;
+        margin-top: 2rem;
+        padding-top: 1rem;
+        border-top: 1px solid #444;
+        font-size: 0.9em;
+        color: #aaa;
+      }
+
+      @media (max-width: 768px) {
+        .optimization-panel {
+          grid-template-columns: 1fr;
+        }
+
+        .results-summary, .team-stats {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
